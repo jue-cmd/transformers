@@ -278,9 +278,9 @@ class MultiHeadEmbedding(nn.Module):
         self.total_N = sum(list_of_N)
         self.embedding = nn.Embedding(num_embeddings=self.total_N, embedding_dim=D)
 
-    def forward(self, input_ids: torch.Tensor) -> torch.Tensor:
-        shifted_input_ids = (input_ids.cpu() + self.offsets.cpu()) % self.total_N
-        output = self.embedding(shifted_input_ids.to(self.embedding.weight.device))
+    def forward(self, hashed_input_ids: torch.Tensor) -> torch.Tensor:
+        shifted_input_ids = hashed_input_ids + self.offsets
+        output = self.embedding(shifted_input_ids)
 
         return output
 
@@ -296,10 +296,8 @@ class Engram(nn.Module):
         self.hash_mapping = NgramHashMapping(
             engram_vocab_size=engram_cfg.engram_vocab_size,
             max_ngram_size=engram_cfg.max_ngram_size,
-            n_embed_per_ngram=engram_cfg.n_embed_per_ngram,
             n_head_per_ngram=engram_cfg.n_head_per_ngram,
             layer_ids=engram_cfg.layer_ids,
-            tokenizer_name_or_path=engram_cfg.tokenizer_name_or_path,
             pad_id=engram_cfg.pad_id,
             seed=engram_cfg.seed,
         )
@@ -307,12 +305,13 @@ class Engram(nn.Module):
         list_of_N = [x for y in self.hash_mapping.vocab_size_across_layers[self.layer_id] for x in y]
         embed_dim_per_head = engram_cfg.n_embed_per_ngram // engram_cfg.n_head_per_ngram
 
+        # (B, L, list_of_N, embed_dim_per_head)
         self.multi_head_embedding = MultiHeadEmbedding(
             list_of_N=list_of_N,
             D=embed_dim_per_head,
         )
         self.short_conv = ShortConv(
-            hidden_size=self.hidden_size,
+            hidden_size=self.head_dim,
             kernel_size=engram_cfg.kernel_size,
             dilation=engram_cfg.max_ngram_size,
             hc_mult=self.hc_mult,
@@ -327,18 +326,21 @@ class Engram(nn.Module):
 
     def forward(self, hidden_states, input_ids):
         """
-        hidden_states: [B, L, H]
+        hidden_states: [B, L, D]
         input_ids: [B, L]
         """
         input_shape = hidden_states.shape[:-1]
         input_device = hidden_states.device
 
-        hash_ids_np = self.hash_mapping.hash(input_ids.detach().cpu().numpy())[self.layer_id]
+        hash_ids_np = self.hash_mapping.hash(input_ids.numpy())[self.layer_id]
         hash_input_ids = torch.from_numpy(hash_ids_np).to(device=input_device, dtype=torch.long)
+        # [B, L, He, hde] 头部数量 是与(max_ngram_size-1)和n_embed_per_ngram相乘计算可得
         embeddings = self.multi_head_embedding(hash_input_ids).flatten(start_dim=-2)
-        normed_key = self.key_norm(self.key_proj(embeddings).view(*input_shape, self.hc_mult, self.hidden_size))
-        # 多头
+        # [B, L, H, hD]
+        normed_key = self.key_norm(self.key_proj(embeddings).view(*input_shape, self.hc_mult, self.head_dim))
+        # [B, L, H, hD]
         normed_query = self.query_norm(hidden_states.view(*input_shape, self.hc_mult, self.head_dim))
+
         gate = (normed_key * normed_query).sum(dim=-1) / math.sqrt(self.head_dim)
 
         value_base = self.value_proj(embeddings).unsqueeze(2)
