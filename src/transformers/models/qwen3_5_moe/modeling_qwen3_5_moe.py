@@ -1716,6 +1716,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             self,
             input_ids: torch.Tensor | None,
             inputs_embeds: torch.Tensor | None,
+            binary_embeds: torch.Tensor | None = None,
             image_grid_thw: torch.Tensor | None = None,
             video_grid_thw: torch.Tensor | None = None,
             attention_mask: torch.Tensor | None = None,
@@ -1723,7 +1724,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             mm_token_type_ids: torch.IntTensor | None = None,
     ) -> torch.Tensor | None:
         past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
-        has_multimodal = image_grid_thw is not None or video_grid_thw is not None
+        has_multimodal = image_grid_thw is not None or video_grid_thw is not None or binary_embeds is not None
         if has_multimodal and mm_token_type_ids is None and input_ids is not None:
             raise ValueError(
                 "Multimodal data was passed (via `image_grid_thw` or `video_grid_thw`) but `mm_token_type_ids` is "
@@ -1774,6 +1775,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             pixel_values_videos: torch.FloatTensor | None = None,
             image_grid_thw: torch.LongTensor | None = None,
             video_grid_thw: torch.LongTensor | None = None,
+            byte_ids: torch.LongTensor | None = None,
             mm_token_type_ids: torch.IntTensor | None = None,
             **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen3_5MoeModelOutputWithPast:
@@ -1788,6 +1790,16 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
 
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
+
+        binary_embeds = None
+        if byte_ids is not None:
+            binary_embeds = self.binary_encoder(byte_ids)
+            binary_embeds = binary_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
+
+            _, _, binary_mask = self.get_placeholder_mask(
+                input_ids, inputs_embeds=inputs_embeds, binary_features=binary_embeds
+            )
+            inputs_embeds = inputs_embeds.masked_scatter(binary_mask, binary_embeds)
 
         if pixel_values is not None:
             image_outputs: BaseModelOutputWithPooling = self.get_image_features(
@@ -1811,13 +1823,13 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             )
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
 
-
         if position_ids is None:
             position_ids = self.compute_3d_position_ids(
                 input_ids=input_ids,
                 image_grid_thw=image_grid_thw,
                 video_grid_thw=video_grid_thw,
                 inputs_embeds=inputs_embeds,
+                binary_embeds=binary_embeds,
                 attention_mask=attention_mask,
                 past_key_values=past_key_values,
                 mm_token_type_ids=mm_token_type_ids,
