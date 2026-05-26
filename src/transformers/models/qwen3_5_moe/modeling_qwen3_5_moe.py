@@ -27,6 +27,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
+from .binary_encoder import BinaryByteModalEncoder
 from ... import initialization as init
 from ...activations import ACT2FN
 from ...cache_utils import Cache, DynamicCache
@@ -50,7 +51,6 @@ from ...utils.generic import is_flash_attention_requested, maybe_autocast, merge
 from ...utils.import_utils import is_causal_conv1d_available, is_flash_linear_attention_available
 from ...utils.output_capturing import OutputRecorder, capture_outputs
 from .configuration_qwen3_5_moe import Qwen3_5MoeConfig, Qwen3_5MoeTextConfig, Qwen3_5MoeVisionConfig
-
 
 if is_causal_conv1d_available():
     from causal_conv1d import causal_conv1d_fn, causal_conv1d_update
@@ -105,9 +105,9 @@ class Qwen3_5MoeTextRotaryEmbedding(nn.Module):
 
     @staticmethod
     def compute_default_rope_parameters(
-        config: Qwen3_5MoeTextConfig | None = None,
-        device: Optional["torch.device"] = None,
-        seq_len: int | None = None,
+            config: Qwen3_5MoeTextConfig | None = None,
+            device: Optional["torch.device"] = None,
+            seq_len: int | None = None,
     ) -> tuple["torch.Tensor", float]:
         """
         Computes the inverse frequencies according to the original RoPE implementation
@@ -131,7 +131,7 @@ class Qwen3_5MoeTextRotaryEmbedding(nn.Module):
 
         # Compute the inverse frequencies
         inv_freq = 1.0 / (
-            base ** (torch.arange(0, dim, 2, dtype=torch.int64).to(device=device, dtype=torch.float) / dim)
+                base ** (torch.arange(0, dim, 2, dtype=torch.int64).to(device=device, dtype=torch.float) / dim)
         )
         return inv_freq, attention_factor
 
@@ -209,11 +209,11 @@ is_fast_path_available = all(
 
 
 def torch_causal_conv1d_update(
-    hidden_states,
-    conv_state,
-    weight,
-    bias=None,
-    activation=None,
+        hidden_states,
+        conv_state,
+        weight,
+        bias=None,
+        activation=None,
 ):
     _, hidden_size, seq_len = hidden_states.shape
     state_len = conv_state.shape[-1]
@@ -233,15 +233,15 @@ def l2norm(x: torch.FloatTensor, dim: int = -1, eps: float = 1e-6):
 
 
 def torch_chunk_gated_delta_rule(
-    query,
-    key,
-    value,
-    g,
-    beta,
-    chunk_size=64,
-    initial_state=None,
-    output_final_state=False,
-    use_qk_l2norm_in_kernel=False,
+        query,
+        key,
+        value,
+        g,
+        beta,
+        chunk_size=64,
+        initial_state=None,
+        output_final_state=False,
+        use_qk_l2norm_in_kernel=False,
 ):
     initial_dtype = query.dtype
     if use_qk_l2norm_in_kernel:
@@ -300,8 +300,8 @@ def torch_chunk_gated_delta_rule(
         attn_inter = (q_i * g[:, :, i, :, None].exp()) @ last_recurrent_state
         core_attn_out[:, :, i] = attn_inter + attn @ v_new
         last_recurrent_state = (
-            last_recurrent_state * g[:, :, i, -1, None, None].exp()
-            + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
+                last_recurrent_state * g[:, :, i, -1, None, None].exp()
+                + (k_i * (g[:, :, i, -1, None] - g[:, :, i]).exp()[..., None]).transpose(-1, -2) @ v_new
         )
 
     if not output_final_state:
@@ -313,7 +313,7 @@ def torch_chunk_gated_delta_rule(
 
 
 def torch_recurrent_gated_delta_rule(
-    query, key, value, g, beta, initial_state, output_final_state, use_qk_l2norm_in_kernel=False
+        query, key, value, g, beta, initial_state, output_final_state, use_qk_l2norm_in_kernel=False
 ):
     initial_dtype = query.dtype
     if use_qk_l2norm_in_kernel:
@@ -421,10 +421,10 @@ class Qwen3_5MoeGatedDeltaNet(nn.Module):
         self.in_proj_a = nn.Linear(self.hidden_size, self.num_v_heads, bias=False)
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        cache_params: Cache | None = None,
-        attention_mask: torch.Tensor | None = None,
+            self,
+            hidden_states: torch.Tensor,
+            cache_params: Cache | None = None,
+            attention_mask: torch.Tensor | None = None,
     ):
         hidden_states = apply_mask_to_padding_states(hidden_states, attention_mask)
 
@@ -432,7 +432,7 @@ class Qwen3_5MoeGatedDeltaNet(nn.Module):
         batch_size, seq_len, _ = hidden_states.shape
 
         use_precomputed_states = (
-            cache_params is not None and cache_params.has_previous_state(self.layer_idx) and seq_len == 1
+                cache_params is not None and cache_params.has_previous_state(self.layer_idx) and seq_len == 1
         )
 
         # getting projected states from cache if it exists
@@ -537,7 +537,7 @@ class Qwen3_5MoeGatedDeltaNet(nn.Module):
 def rotate_half(x):
     """Rotates half the hidden dims of the input."""
     x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
+    x2 = x[..., x.shape[-1] // 2:]
     return torch.cat((-x2, x1), dim=-1)
 
 
@@ -593,14 +593,14 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 def eager_attention_forward(
-    module: nn.Module,
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    attention_mask: torch.Tensor | None,
-    scaling: float,
-    dropout: float = 0.0,
-    **kwargs: Unpack[TransformersKwargs],
+        module: nn.Module,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+        scaling: float,
+        dropout: float = 0.0,
+        **kwargs: Unpack[TransformersKwargs],
 ):
     key_states = repeat_kv(key, module.num_key_value_groups)
     value_states = repeat_kv(value, module.num_key_value_groups)
@@ -627,7 +627,7 @@ class Qwen3_5MoeAttention(nn.Module):
         self.layer_idx = layer_idx
         self.head_dim = getattr(config, "head_dim", config.hidden_size // config.num_attention_heads)
         self.num_key_value_groups = config.num_attention_heads // config.num_key_value_heads
-        self.scaling = self.head_dim**-0.5
+        self.scaling = self.head_dim ** -0.5
         self.attention_dropout = config.attention_dropout
         self.is_causal = True
         self.q_proj = nn.Linear(
@@ -648,12 +648,12 @@ class Qwen3_5MoeAttention(nn.Module):
         )  # thus post q_norm does not need reshape
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        attention_mask: torch.Tensor | None,
-        past_key_values: Cache | None = None,
-        **kwargs: Unpack[FlashAttentionKwargs],
+            self,
+            hidden_states: torch.Tensor,
+            position_embeddings: tuple[torch.Tensor, torch.Tensor],
+            attention_mask: torch.Tensor | None,
+            past_key_values: Cache | None = None,
+            **kwargs: Unpack[FlashAttentionKwargs],
     ) -> tuple[torch.Tensor, torch.Tensor | None]:
         input_shape = hidden_states.shape[:-1]
         hidden_shape = (*input_shape, -1, self.head_dim)
@@ -725,10 +725,10 @@ class Qwen3_5MoeExperts(nn.Module):
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        top_k_index: torch.Tensor,
-        top_k_weights: torch.Tensor,
+            self,
+            hidden_states: torch.Tensor,
+            top_k_index: torch.Tensor,
+            top_k_weights: torch.Tensor,
     ) -> torch.Tensor:
         final_hidden_states = torch.zeros_like(hidden_states)
         with torch.no_grad():
@@ -826,13 +826,13 @@ class Qwen3_5MoeDecoderLayer(GradientCheckpointingLayer):
         self.post_attention_layernorm = Qwen3_5MoeRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor],
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: Cache | None = None,
-        **kwargs: Unpack[FlashAttentionKwargs],
+            self,
+            hidden_states: torch.Tensor,
+            position_embeddings: tuple[torch.Tensor, torch.Tensor],
+            attention_mask: torch.Tensor | None = None,
+            position_ids: torch.LongTensor | None = None,
+            past_key_values: Cache | None = None,
+            **kwargs: Unpack[FlashAttentionKwargs],
     ) -> torch.FloatTensor:
         residual = hidden_states
 
@@ -941,7 +941,7 @@ class Qwen3_5MoeVisionPatchEmbed(nn.Module):
 class Qwen3_5MoeVisionPatchMerger(nn.Module):
     def __init__(self, config: Qwen3_5MoeVisionConfig, use_postshuffle_norm=False) -> None:
         super().__init__()
-        self.hidden_size = config.hidden_size * (config.spatial_merge_size**2)
+        self.hidden_size = config.hidden_size * (config.spatial_merge_size ** 2)
         self.use_postshuffle_norm = use_postshuffle_norm
         self.norm = nn.LayerNorm(self.hidden_size if use_postshuffle_norm else config.hidden_size, eps=1e-6)
         self.linear_fc1 = nn.Linear(self.hidden_size, self.hidden_size)
@@ -955,7 +955,7 @@ class Qwen3_5MoeVisionPatchMerger(nn.Module):
 
 
 def apply_rotary_pos_emb_vision(
-    q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+        q: torch.Tensor, k: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
 ) -> tuple[torch.Tensor, torch.Tensor]:
     orig_q_dtype = q.dtype
     orig_k_dtype = k.dtype
@@ -977,18 +977,18 @@ class Qwen3_5MoeVisionAttention(nn.Module):
         self.num_key_value_groups = 1  # needed for eager attention
         self.qkv = nn.Linear(self.dim, self.dim * 3, bias=True)
         self.proj = nn.Linear(self.dim, self.dim)
-        self.scaling = self.head_dim**-0.5
+        self.scaling = self.head_dim ** -0.5
         self.config = config
         self.attention_dropout = 0.0
         self.is_causal = False
 
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        cu_seqlens: torch.Tensor,
-        rotary_pos_emb: torch.Tensor | None = None,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
-        **kwargs,
+            self,
+            hidden_states: torch.Tensor,
+            cu_seqlens: torch.Tensor,
+            rotary_pos_emb: torch.Tensor | None = None,
+            position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+            **kwargs,
     ) -> torch.Tensor:
         seq_length = hidden_states.shape[0]
         query_states, key_states, value_states = (
@@ -1061,12 +1061,12 @@ class Qwen3_5MoeVisionBlock(GradientCheckpointingLayer):
 
     @auto_docstring
     def forward(
-        self,
-        hidden_states: torch.Tensor,
-        cu_seqlens: torch.Tensor,
-        rotary_pos_emb: torch.Tensor | None = None,
-        position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
-        **kwargs,
+            self,
+            hidden_states: torch.Tensor,
+            cu_seqlens: torch.Tensor,
+            rotary_pos_emb: torch.Tensor | None = None,
+            position_embeddings: tuple[torch.Tensor, torch.Tensor] | None = None,
+            **kwargs,
     ) -> torch.Tensor:
         r"""
         cu_seqlens (`torch.Tensor`):
@@ -1105,7 +1105,7 @@ class Qwen3_5MoeVisionModel(Qwen3_5MoePreTrainedModel):
         )
 
         self.pos_embed = nn.Embedding(config.num_position_embeddings, config.hidden_size)
-        self.num_grid_per_side = int(config.num_position_embeddings**0.5)
+        self.num_grid_per_side = int(config.num_position_embeddings ** 0.5)
 
         head_dim = config.hidden_size // config.num_heads
         self.rotary_pos_emb = Qwen3_5MoeVisionRotaryEmbedding(head_dim // 2)
@@ -1153,7 +1153,7 @@ class Qwen3_5MoeVisionModel(Qwen3_5MoePreTrainedModel):
                 coords = coords.repeat(num_frames, 1)
 
             num_tokens = coords.shape[0]
-            pos_ids[offset : offset + num_tokens] = coords
+            pos_ids[offset: offset + num_tokens] = coords
             offset += num_tokens
 
         embeddings = freq_table[pos_ids]  # lookup rotary embeddings
@@ -1350,14 +1350,14 @@ class Qwen3_5MoeTextModel(Qwen3_5MoePreTrainedModel):
     @capture_outputs
     @auto_docstring
     def forward(
-        self,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: Cache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        use_cache: bool | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            input_ids: torch.LongTensor | None = None,
+            attention_mask: torch.Tensor | None = None,
+            position_ids: torch.LongTensor | None = None,
+            past_key_values: Cache | None = None,
+            inputs_embeds: torch.FloatTensor | None = None,
+            use_cache: bool | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> BaseModelOutputWithPast:
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
@@ -1423,7 +1423,7 @@ class Qwen3_5MoeTextModel(Qwen3_5MoePreTrainedModel):
         """
         linear_attn_mask = attention_mask
         if (past_key_values is not None and past_key_values.has_previous_state()) or (
-            attention_mask is not None and torch.all(attention_mask == 1)
+                attention_mask is not None and torch.all(attention_mask == 1)
         ):
             linear_attn_mask = None
         return linear_attn_mask
@@ -1441,6 +1441,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
         super().__init__(config)
         self.visual = Qwen3_5MoeVisionModel._from_config(config.vision_config)
         self.language_model = Qwen3_5MoeTextModel._from_config(config.text_config)
+        self.bin_model = BinaryByteModalEncoder(config.binary_config)
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1453,13 +1454,13 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
         self.language_model.set_input_embeddings(value)
 
     def get_vision_position_ids(
-        self,
-        start_position: int,
-        grid_thw: list[int, int, int] | torch.Tensor,
-        temp_merge_size: int = 1,
-        spatial_merge_size: int = 1,
-        time_interval: int = 1,
-        device: str | torch.device | None = None,
+            self,
+            start_position: int,
+            grid_thw: list[int, int, int] | torch.Tensor,
+            temp_merge_size: int = 1,
+            spatial_merge_size: int = 1,
+            time_interval: int = 1,
+            device: str | torch.device | None = None,
     ):
         """
         Compute 3D positional indices for vision tokens derived from a single image or video input.
@@ -1510,14 +1511,18 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
 
         return vision_position_ids
 
+    def get_binary_position_ids(self, start_position: int, num_queries: int, device=None):
+        pos = torch.arange(num_queries, device=device) + start_position
+        return torch.stack([pos, pos, pos], dim=0)
+
     def get_rope_index(
-        self,
-        input_ids: torch.LongTensor,
-        mm_token_type_ids: torch.IntTensor,
-        image_grid_thw: torch.LongTensor | None = None,
-        video_grid_thw: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        **kwargs,
+            self,
+            input_ids: torch.LongTensor,
+            mm_token_type_ids: torch.IntTensor,
+            image_grid_thw: torch.LongTensor | None = None,
+            video_grid_thw: torch.LongTensor | None = None,
+            attention_mask: torch.Tensor | None = None,
+            **kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Difference from Qwen2VL/Qwen2.5VL's get_rope_index:
@@ -1586,6 +1591,13 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                         torch.arange(text_len, device=input_ids.device).view(1, -1).expand(3, -1) + current_pos
                     )
                     current_pos += text_len
+                # binary == 3
+                elif modality_type == 3:
+                    num_queries = self.config.binary_config.num_queries
+                    binary_position_ids = self.get_binary_position_ids(current_pos, num_queries,
+                                                                       device=input_ids.device)
+                    llm_pos_ids_list.append(binary_position_ids)
+                    current_pos += num_queries
                 # image == 1, video == 2
                 else:
                     grid_thw = next(grid_iters[modality_type])
@@ -1606,10 +1618,10 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
     @can_return_tuple
     @auto_docstring
     def get_video_features(
-        self,
-        pixel_values_videos: torch.FloatTensor,
-        video_grid_thw: torch.LongTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            pixel_values_videos: torch.FloatTensor,
+            video_grid_thw: torch.LongTensor | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | BaseModelOutputWithPooling:
         r"""
         pixel_values_videos (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
@@ -1623,10 +1635,10 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
     @can_return_tuple
     @auto_docstring
     def get_image_features(
-        self,
-        pixel_values: torch.FloatTensor,
-        image_grid_thw: torch.LongTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            pixel_values: torch.FloatTensor,
+            image_grid_thw: torch.LongTensor | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | BaseModelOutputWithPooling:
         r"""
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
@@ -1639,18 +1651,19 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             pixel_values, grid_thw=image_grid_thw, return_dict=True, **kwargs
         )
         image_embeds = vision_output.pooler_output
-        split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
+        split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size ** 2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
         vision_output.pooler_output = image_embeds
 
         return vision_output
 
     def get_placeholder_mask(
-        self,
-        input_ids: torch.LongTensor,
-        inputs_embeds: torch.FloatTensor,
-        image_features: torch.FloatTensor | None = None,
-        video_features: torch.FloatTensor | None = None,
+            self,
+            input_ids: torch.LongTensor,
+            inputs_embeds: torch.FloatTensor,
+            image_features: torch.FloatTensor | None = None,
+            video_features: torch.FloatTensor | None = None,
+            binary_features: torch.FloatTensor | None = None,
     ):
         """
         Obtains multimodal placeholder mask from `input_ids` or `inputs_embeds`, and checks that the placeholder token count is
@@ -1665,9 +1678,14 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                 torch.tensor(self.config.video_token_id, dtype=torch.long, device=inputs_embeds.device)
             )
             special_video_mask = special_video_mask.all(-1)
+            special_binary_mask = inputs_embeds == self.get_input_embeddings()(
+                torch.tensor(self.config.binary_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
+            special_binary_mask = special_binary_mask.all(-1)
         else:
             special_image_mask = input_ids == self.config.image_token_id
             special_video_mask = input_ids == self.config.video_token_id
+            special_binary_mask = input_ids == self.config.binary_token_id
 
         n_image_tokens = special_image_mask.sum()
         special_image_mask = special_image_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
@@ -1684,17 +1702,25 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                 inputs_embeds[special_video_mask].numel() == video_features.numel(),
                 f"Video features and video tokens do not match, tokens: {n_video_tokens}, features: {video_features.shape[0]}",
             )
-        return special_image_mask, special_video_mask
+
+        n_binary_tokens = special_binary_mask.sum()
+        special_binary_mask = special_binary_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
+        if binary_features is not None:
+            torch_compilable_check(
+                inputs_embeds[special_binary_mask].numel() == binary_features.numel(),
+                f"Binary features and binary tokens do not match, tokens: {n_binary_tokens}, features: {binary_features.shape[0]}",
+            )
+        return special_image_mask, special_video_mask, special_binary_mask
 
     def compute_3d_position_ids(
-        self,
-        input_ids: torch.Tensor | None,
-        inputs_embeds: torch.Tensor | None,
-        image_grid_thw: torch.Tensor | None = None,
-        video_grid_thw: torch.Tensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        past_key_values: torch.Tensor | None = None,
-        mm_token_type_ids: torch.IntTensor | None = None,
+            self,
+            input_ids: torch.Tensor | None,
+            inputs_embeds: torch.Tensor | None,
+            image_grid_thw: torch.Tensor | None = None,
+            video_grid_thw: torch.Tensor | None = None,
+            attention_mask: torch.Tensor | None = None,
+            past_key_values: torch.Tensor | None = None,
+            mm_token_type_ids: torch.IntTensor | None = None,
     ) -> torch.Tensor | None:
         past_key_values_length = 0 if past_key_values is None else past_key_values.get_seq_length()
         has_multimodal = image_grid_thw is not None or video_grid_thw is not None
@@ -1738,18 +1764,18 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
     @auto_docstring
     @can_return_tuple
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: Cache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        pixel_values: torch.Tensor | None = None,
-        pixel_values_videos: torch.FloatTensor | None = None,
-        image_grid_thw: torch.LongTensor | None = None,
-        video_grid_thw: torch.LongTensor | None = None,
-        mm_token_type_ids: torch.IntTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: torch.Tensor | None = None,
+            position_ids: torch.LongTensor | None = None,
+            past_key_values: Cache | None = None,
+            inputs_embeds: torch.FloatTensor | None = None,
+            pixel_values: torch.Tensor | None = None,
+            pixel_values_videos: torch.FloatTensor | None = None,
+            image_grid_thw: torch.LongTensor | None = None,
+            video_grid_thw: torch.LongTensor | None = None,
+            mm_token_type_ids: torch.IntTensor | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen3_5MoeModelOutputWithPast:
         r"""
         image_grid_thw (`torch.LongTensor` of shape `(num_images, 3)`, *optional*):
@@ -1769,7 +1795,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             )
             image_embeds = image_outputs.pooler_output
             image_embeds = torch.cat(image_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
-            image_mask, _ = self.get_placeholder_mask(
+            image_mask, _, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, image_features=image_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(image_mask, image_embeds)
@@ -1780,10 +1806,11 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
             )
             video_embeds = video_outputs.pooler_output
             video_embeds = torch.cat(video_embeds, dim=0).to(inputs_embeds.device, inputs_embeds.dtype)
-            _, video_mask = self.get_placeholder_mask(
+            _, video_mask, _ = self.get_placeholder_mask(
                 input_ids, inputs_embeds=inputs_embeds, video_features=video_embeds
             )
             inputs_embeds = inputs_embeds.masked_scatter(video_mask, video_embeds)
+
 
         if position_ids is None:
             position_ids = self.compute_3d_position_ids(
@@ -1812,10 +1839,10 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
 
 
 def load_balancing_loss_func(
-    gate_logits: torch.Tensor | tuple[torch.Tensor] | None,
-    num_experts: int | None = None,
-    top_k=2,
-    attention_mask: torch.Tensor | None = None,
+        gate_logits: torch.Tensor | tuple[torch.Tensor] | None,
+        num_experts: int | None = None,
+        top_k=2,
+        attention_mask: torch.Tensor | None = None,
 ) -> torch.Tensor | int:
     r"""
     Computes auxiliary load balancing loss as in Switch Transformer - implemented in Pytorch.
@@ -1916,17 +1943,17 @@ class Qwen3_5MoeForCausalLM(Qwen3_5MoePreTrainedModel, GenerationMixin):
     @can_return_tuple
     @auto_docstring
     def forward(
-        self,
-        input_ids: torch.LongTensor | None = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: Cache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        labels: torch.LongTensor | None = None,
-        use_cache: bool | None = None,
-        output_router_logits: bool | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            input_ids: torch.LongTensor | None = None,
+            attention_mask: torch.Tensor | None = None,
+            position_ids: torch.LongTensor | None = None,
+            past_key_values: Cache | None = None,
+            inputs_embeds: torch.FloatTensor | None = None,
+            labels: torch.LongTensor | None = None,
+            use_cache: bool | None = None,
+            output_router_logits: bool | None = None,
+            logits_to_keep: int | torch.Tensor = 0,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> MoeCausalLMOutputWithPast:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -2020,10 +2047,10 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
 
     @auto_docstring
     def get_video_features(
-        self,
-        pixel_values_videos: torch.FloatTensor,
-        video_grid_thw: torch.LongTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            pixel_values_videos: torch.FloatTensor,
+            video_grid_thw: torch.LongTensor | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | BaseModelOutputWithPooling:
         r"""
         pixel_values_videos (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
@@ -2037,10 +2064,10 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
 
     @auto_docstring
     def get_image_features(
-        self,
-        pixel_values: torch.FloatTensor,
-        image_grid_thw: torch.LongTensor | None = None,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            pixel_values: torch.FloatTensor,
+            image_grid_thw: torch.LongTensor | None = None,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | BaseModelOutputWithPooling:
         r"""
         pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, image_size, image_size)`):
@@ -2052,20 +2079,20 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
 
     @can_return_tuple
     def forward(
-        self,
-        input_ids: torch.LongTensor = None,
-        attention_mask: torch.Tensor | None = None,
-        position_ids: torch.LongTensor | None = None,
-        past_key_values: Cache | None = None,
-        inputs_embeds: torch.FloatTensor | None = None,
-        labels: torch.LongTensor | None = None,
-        pixel_values: torch.Tensor | None = None,
-        pixel_values_videos: torch.FloatTensor | None = None,
-        image_grid_thw: torch.LongTensor | None = None,
-        video_grid_thw: torch.LongTensor | None = None,
-        mm_token_type_ids: torch.IntTensor | None = None,
-        logits_to_keep: int | torch.Tensor = 0,
-        **kwargs: Unpack[TransformersKwargs],
+            self,
+            input_ids: torch.LongTensor = None,
+            attention_mask: torch.Tensor | None = None,
+            position_ids: torch.LongTensor | None = None,
+            past_key_values: Cache | None = None,
+            inputs_embeds: torch.FloatTensor | None = None,
+            labels: torch.LongTensor | None = None,
+            pixel_values: torch.Tensor | None = None,
+            pixel_values_videos: torch.FloatTensor | None = None,
+            image_grid_thw: torch.LongTensor | None = None,
+            video_grid_thw: torch.LongTensor | None = None,
+            mm_token_type_ids: torch.IntTensor | None = None,
+            logits_to_keep: int | torch.Tensor = 0,
+            **kwargs: Unpack[TransformersKwargs],
     ) -> tuple | Qwen3_5MoeCausalLMOutputWithPast:
         r"""
         labels (`torch.LongTensor` of shape `(batch_size, sequence_length)`, *optional*):
@@ -2167,19 +2194,19 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
         )
 
     def prepare_inputs_for_generation(
-        self,
-        input_ids,
-        past_key_values=None,
-        attention_mask=None,
-        inputs_embeds=None,
-        position_ids=None,
-        use_cache=True,
-        pixel_values=None,
-        pixel_values_videos=None,
-        image_grid_thw=None,
-        video_grid_thw=None,
-        is_first_iteration=False,
-        **kwargs,
+            self,
+            input_ids,
+            past_key_values=None,
+            attention_mask=None,
+            inputs_embeds=None,
+            position_ids=None,
+            use_cache=True,
+            pixel_values=None,
+            pixel_values_videos=None,
+            image_grid_thw=None,
+            video_grid_thw=None,
+            is_first_iteration=False,
+            **kwargs,
     ):
         # Overwritten -- in specific circumstances we don't want to forward image inputs to the model
 
@@ -2223,9 +2250,9 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
 
         is_input_ids = len(inputs_tensor.shape) == 2 and inputs_tensor.dtype in [torch.int, torch.long]
         if (
-            is_input_ids
-            and model_kwargs.get("mm_token_type_ids") is not None
-            and (model_kwargs.get("image_grid_thw") is not None or model_kwargs.get("video_grid_thw") is not None)
+                is_input_ids
+                and model_kwargs.get("mm_token_type_ids") is not None
+                and (model_kwargs.get("image_grid_thw") is not None or model_kwargs.get("video_grid_thw") is not None)
         ):
             model_kwargs = {k: v for k, v in model_kwargs.items() if k != "input_ids"}
             vision_positions, rope_deltas = self.model.get_rope_index(inputs_tensor, **model_kwargs)
@@ -2243,9 +2270,9 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
         return position_ids
 
     def _get_image_nums_and_video_nums(
-        self,
-        input_ids: torch.LongTensor | None,
-        inputs_embeds: torch.Tensor | None = None,
+            self,
+            input_ids: torch.LongTensor | None,
+            inputs_embeds: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Get the number of images and videos for each sample to calculate the separation length of the sample tensor.
@@ -2265,22 +2292,22 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
 
         if inputs_embeds is not None:
             vision_start_mask = (
-                inputs_embeds
-                == self.get_input_embeddings()(
-                    torch.tensor(vision_start_token_id, dtype=torch.long, device=inputs_embeds.device)
-                )
+                    inputs_embeds
+                    == self.get_input_embeddings()(
+                torch.tensor(vision_start_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
             )[..., 0]
             image_mask = (
-                inputs_embeds
-                == self.get_input_embeddings()(
-                    torch.tensor(image_token_id, dtype=torch.long, device=inputs_embeds.device)
-                )
+                    inputs_embeds
+                    == self.get_input_embeddings()(
+                torch.tensor(image_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
             )[..., 0]
             video_mask = (
-                inputs_embeds
-                == self.get_input_embeddings()(
-                    torch.tensor(video_token_id, dtype=torch.long, device=inputs_embeds.device)
-                )
+                    inputs_embeds
+                    == self.get_input_embeddings()(
+                torch.tensor(video_token_id, dtype=torch.long, device=inputs_embeds.device)
+            )
             )[..., 0]
         else:
             vision_start_mask = input_ids == vision_start_token_id
@@ -2294,11 +2321,11 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
         return image_nums, video_nums
 
     def _expand_inputs_for_generation(
-        self,
-        expand_size: int = 1,
-        is_encoder_decoder: bool = False,
-        input_ids: torch.LongTensor | None = None,
-        **model_kwargs,
+            self,
+            expand_size: int = 1,
+            is_encoder_decoder: bool = False,
+            input_ids: torch.LongTensor | None = None,
+            **model_kwargs,
     ) -> tuple[torch.LongTensor, dict[str, Any]]:
         # Overwritten -- Qwen3_5Moe use timestamps and remove second_per_grid_ts
         # Support for expanding tensors without a batch size dimension
@@ -2368,9 +2395,9 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
                 if key == "position_ids" and dict_to_expand[key].ndim == 3:
                     dict_to_expand[key] = dict_to_expand[key].repeat_interleave(expand_size, dim=1)
                 elif (
-                    dict_to_expand[key] is not None
-                    and isinstance(dict_to_expand[key], torch.Tensor)
-                    and key not in visual_keys
+                        dict_to_expand[key] is not None
+                        and isinstance(dict_to_expand[key], torch.Tensor)
+                        and key not in visual_keys
                 ):
                     dict_to_expand[key] = dict_to_expand[key].repeat_interleave(expand_size, dim=0)
             return dict_to_expand

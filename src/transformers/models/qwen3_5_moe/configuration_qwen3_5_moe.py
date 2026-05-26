@@ -150,6 +150,33 @@ class Qwen3_5MoeVisionConfig(PreTrainedConfig):
 
 @auto_docstring(checkpoint="Qwen/Qwen3.5-35B-A3B")
 @strict
+class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
+    r"""
+    Configuration class for the Binary Byte-Level Modal Encoder.
+
+    Args:
+        num_queries (`int`, *optional*, defaults to 256):
+            The specific number of tokens the binary file will be compressed into.
+        encoder_dim (`int`, *optional*, defaults to 1024):
+            Hidden size of the binary byte encoder layers.
+        downsample_factor (`int`, *optional*, defaults to 16):
+            The factor of sequence folding for downsampling the raw byte stream.
+        out_hidden_size (`int`, *optional*, defaults to 4096):
+            The output hidden size that matches the LLM backbone's hidden size.
+    """
+
+    model_type = "qwen3_5_moe_binary"
+    base_config_key = "binary_config"
+
+    num_queries: int = 256
+    encoder_dim: int = 1024
+    downsample_factor: int = 16
+    out_hidden_size: int = 4096
+    initializer_range: float = 0.02
+
+
+@auto_docstring(checkpoint="Qwen/Qwen3.5-35B-A3B")
+@strict
 class Qwen3_5MoeConfig(PreTrainedConfig):
     r"""
     Example:
@@ -168,16 +195,23 @@ class Qwen3_5MoeConfig(PreTrainedConfig):
     ```"""
 
     model_type = "qwen3_5_moe"
-    sub_configs = {"vision_config": Qwen3_5MoeVisionConfig, "text_config": Qwen3_5MoeTextConfig}
+    sub_configs = {"vision_config": Qwen3_5MoeVisionConfig, "text_config": Qwen3_5MoeTextConfig,
+                   "binary_config": Qwen3_5MoeBinaryConfig}
     keys_to_ignore_at_inference = ["past_key_values"]
 
     text_config: dict | PreTrainedConfig | None = None
     vision_config: dict | PreTrainedConfig | None = None
+    binary_config: dict | PreTrainedConfig | None = None
 
     image_token_id: int = 248056
     video_token_id: int = 248057
     vision_start_token_id: int = 248053
     vision_end_token_id: int = 248054
+
+    binary_token_id: int = 248058
+    binary_start_token_id: int = 248059
+    binary_end_token_id: int = 248060
+
     tie_word_embeddings: bool = False
 
     def __post_init__(self, **kwargs):
@@ -186,12 +220,18 @@ class Qwen3_5MoeConfig(PreTrainedConfig):
         elif self.vision_config is None:
             self.vision_config = self.sub_configs["vision_config"]()
 
+        if isinstance(self.binary_config, dict):
+            self.binary_config = self.sub_configs["binary_config"](**self.binary_config)
+        elif self.binary_config is None:
+            self.binary_config = self.sub_configs["binary_config"]()
+
         if isinstance(self.text_config, dict):
             self.text_config = self.sub_configs["text_config"](**self.text_config)
+
         elif self.text_config is None:
             self.text_config = self.sub_configs["text_config"]()
 
         super().__post_init__(**kwargs)
 
 
-__all__ = ["Qwen3_5MoeConfig", "Qwen3_5MoeTextConfig", "Qwen3_5MoeVisionConfig"]
+__all__ = ["Qwen3_5MoeConfig", "Qwen3_5MoeTextConfig", "Qwen3_5MoeVisionConfig", "Qwen3_5MoeBinaryConfig"]
