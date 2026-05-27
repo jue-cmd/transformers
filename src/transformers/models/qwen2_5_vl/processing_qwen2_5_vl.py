@@ -121,12 +121,11 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
             videos_inputs.update({"second_per_grid_ts": second_per_grid_ts})
 
         binary_inputs = {
-            "byte_ids":[]
         }
         if binaries is not None:
             if isinstance(binaries, str):
                 binaries = [binaries]
-
+            binary_inputs['byte_ids']=[]
             for bath_paths in binaries:
                 byte_ids_pre_batch=[]
                 for path in bath_paths:

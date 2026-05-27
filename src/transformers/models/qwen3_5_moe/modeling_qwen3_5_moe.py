@@ -1702,7 +1702,6 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                 inputs_embeds[special_video_mask].numel() == video_features.numel(),
                 f"Video features and video tokens do not match, tokens: {n_video_tokens}, features: {video_features.shape[0]}",
             )
-        print(special_binary_mask)
         n_binary_tokens = special_binary_mask.sum()
         special_binary_mask = special_binary_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
         if binary_features is not None:
@@ -1788,10 +1787,14 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
         if (input_ids is None) ^ (inputs_embeds is not None):
             raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
 
+        is_decode_stage = (past_key_values is not None)
+
+        if is_decode_stage:
+            byte_ids = None
+
         if inputs_embeds is None:
             inputs_embeds = self.get_input_embeddings()(input_ids)
-
-        binary_embeds = None
+        binary_embeds=None
         if byte_ids is not None:
             binary_embeds = self.binary_encoder(byte_ids)
             binary_embeds = binary_embeds.to(inputs_embeds.device, inputs_embeds.dtype)
@@ -1834,7 +1837,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                 past_key_values=past_key_values,
                 mm_token_type_ids=mm_token_type_ids,
             )
-
+        #print(inputs_embeds)
         outputs = self.language_model(
             input_ids=None,
             position_ids=position_ids,

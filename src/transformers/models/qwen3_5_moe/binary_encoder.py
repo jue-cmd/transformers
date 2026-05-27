@@ -106,8 +106,6 @@ class BinaryByteModalEncoder(nn.Module):
         )
 
     def forward(self, byte_ids):
-        # byte_ids 的原始形状: [B, N, L] -> [Batch大小, 每个样本的文件数, 每个文件的字节长度]
-        print("Original shape:", byte_ids.shape)
         B, N, L = byte_ids.shape
         byte_ids_flat = byte_ids.view(B * N, L)
         pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
@@ -125,7 +123,7 @@ class BinaryByteModalEncoder(nn.Module):
         llm_inputs_flat = self.projector(compressed_matrix)
         LLM_Dim = llm_inputs_flat.shape[-1]
         llm_inputs = llm_inputs_flat.view(B, N, num_queries, LLM_Dim)
-        print("Final output shape:", llm_inputs.shape)
+        print(llm_inputs)
         return llm_inputs
 
 
