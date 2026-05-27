@@ -72,7 +72,6 @@ from .utils.type_validators import (
 )
 from .video_utils import VideoInput, VideoMetadataType
 
-
 if is_torch_available():
     import torch
 
@@ -629,12 +628,12 @@ class ProcessorMixin(PushToHubMixin):
             setattr(self, attribute_name, arg)
 
     def __call__(
-        self,
-        images: ImageInput | None = None,
-        text: TextInput | PreTokenizedInput | list[TextInput] | list[PreTokenizedInput] | None = None,
-        videos: VideoInput | None = None,
-        audio: AudioInput | None = None,
-        **kwargs: Unpack[ProcessingKwargs],
+            self,
+            images: ImageInput | None = None,
+            text: TextInput | PreTokenizedInput | list[TextInput] | list[PreTokenizedInput] | None = None,
+            videos: VideoInput | None = None,
+            audio: AudioInput | None = None,
+            **kwargs: Unpack[ProcessingKwargs],
     ):
         """
         Main method to prepare for model inputs. This method forwards the each modality argument to its own processor
@@ -768,8 +767,8 @@ class ProcessorMixin(PushToHubMixin):
             k: v.to_dict() if isinstance(v, PushToHubMixin) else v
             for k, v in output.items()
             if (
-                k in attrs_to_save  # keep all attributes that have to be serialized
-                and v.__class__.__name__ != "BeamSearchDecoderCTC"  # remove attributes with that are objects
+                    k in attrs_to_save  # keep all attributes that have to be serialized
+                    and v.__class__.__name__ != "BeamSearchDecoderCTC"  # remove attributes with that are objects
             )
         }
         output = cast_array_to_list(output)
@@ -912,7 +911,7 @@ class ProcessorMixin(PushToHubMixin):
 
     @classmethod
     def get_processor_dict(
-        cls, pretrained_model_name_or_path: str | os.PathLike, **kwargs
+            cls, pretrained_model_name_or_path: str | os.PathLike, **kwargs
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """
         From a `pretrained_model_name_or_path`, resolve to a dictionary of parameters, to be used for instantiating a
@@ -974,11 +973,11 @@ class ProcessorMixin(PushToHubMixin):
             else:
                 try:
                     for template in list_repo_templates(
-                        pretrained_model_name_or_path,
-                        local_files_only=local_files_only,
-                        revision=revision,
-                        cache_dir=cache_dir,
-                        token=token,
+                            pretrained_model_name_or_path,
+                            local_files_only=local_files_only,
+                            revision=revision,
+                            cache_dir=cache_dir,
+                            token=token,
                     ):
                         template = template.removesuffix(".jinja")
                         additional_chat_template_files[template] = f"{CHAT_TEMPLATE_DIR}/{template}.jinja"
@@ -1203,10 +1202,10 @@ class ProcessorMixin(PushToHubMixin):
             return processor
 
     def _merge_kwargs(
-        self,
-        ModelProcessorKwargs: ProcessingKwargs,
-        tokenizer_init_kwargs: dict | None = None,
-        **kwargs,
+            self,
+            ModelProcessorKwargs: ProcessingKwargs,
+            tokenizer_init_kwargs: dict | None = None,
+            **kwargs,
     ) -> dict[str, dict]:
         """
         Method to merge dictionaries of kwargs cleanly separated by modality within a Processor instance.
@@ -1379,14 +1378,14 @@ class ProcessorMixin(PushToHubMixin):
 
     @classmethod
     def from_pretrained(
-        cls: type[SpecificProcessorType],
-        pretrained_model_name_or_path: str | os.PathLike,
-        cache_dir: str | os.PathLike | None = None,
-        force_download: bool = False,
-        local_files_only: bool = False,
-        token: str | bool | None = None,
-        revision: str = "main",
-        **kwargs,
+            cls: type[SpecificProcessorType],
+            pretrained_model_name_or_path: str | os.PathLike,
+            cache_dir: str | os.PathLike | None = None,
+            force_download: bool = False,
+            local_files_only: bool = False,
+            token: str | bool | None = None,
+            revision: str = "main",
+            **kwargs,
     ) -> SpecificProcessorType:
         r"""
         Instantiate a processor associated with a pretrained model.
@@ -1480,7 +1479,7 @@ class ProcessorMixin(PushToHubMixin):
 
     @classmethod
     def _load_tokenizer_from_pretrained(
-        cls, sub_processor_type, pretrained_model_name_or_path, subfolder="", **kwargs
+            cls, sub_processor_type, pretrained_model_name_or_path, subfolder="", **kwargs
     ):
         auto_processor_class = MODALITY_TO_AUTOPROCESSOR_MAPPING["tokenizer"]
         is_primary = sub_processor_type == "tokenizer"
@@ -1530,7 +1529,7 @@ class ProcessorMixin(PushToHubMixin):
             is_primary = sub_processor_type == modality
 
             if (
-                "tokenizer" in sub_processor_type
+                    "tokenizer" in sub_processor_type
             ):  # This is only necessary for the checkpoint in test_processing_mistral3.py which has no config.json and
                 # the tokenizer_config.json references LlamaTokenizerFast. TODO: update the config on the hub.
                 if "PixtralProcessor" in cls.__name__:
@@ -1669,20 +1668,20 @@ class ProcessorMixin(PushToHubMixin):
         return mm_token_type_ids
 
     def apply_chat_template(
-        self,
-        conversation: list[dict[str, str]] | list[list[dict[str, str]]],
-        chat_template: str | None = None,
-        tools: list[dict] | None = None,
-        documents: list[dict[str, str]] | None = None,
-        add_generation_prompt: bool = False,
-        continue_final_message: bool = False,
-        return_assistant_tokens_mask: bool = False,
-        tokenize: bool = False,
-        return_tensors: str | TensorType | None = None,
-        return_dict: bool = False,
-        load_audio_from_video: bool = False,
-        processor_kwargs: dict | None = None,
-        **kwargs,
+            self,
+            conversation: list[dict[str, str]] | list[list[dict[str, str]]],
+            chat_template: str | None = None,
+            tools: list[dict] | None = None,
+            documents: list[dict[str, str]] | None = None,
+            add_generation_prompt: bool = False,
+            continue_final_message: bool = False,
+            return_assistant_tokens_mask: bool = False,
+            tokenize: bool = False,
+            return_tensors: str | TensorType | None = None,
+            return_dict: bool = False,
+            load_audio_from_video: bool = False,
+            processor_kwargs: dict | None = None,
+            **kwargs,
     ) -> str:
         """
         Similar to the `apply_chat_template` method on tokenizers, this method applies a Jinja template to input
@@ -1781,7 +1780,7 @@ class ProcessorMixin(PushToHubMixin):
                 sampling_rate = 16_000
 
         if isinstance(conversation, (list, tuple)) and (
-            isinstance(conversation[0], (list, tuple)) or hasattr(conversation[0], "content")
+                isinstance(conversation[0], (list, tuple)) or hasattr(conversation[0], "content")
         ):
             is_batched = True
             conversations = conversation
@@ -1807,16 +1806,19 @@ class ProcessorMixin(PushToHubMixin):
                 message["content"] = new_content
 
         if tokenize:
-            batch_images, batch_videos = [], []
+            batch_images, batch_videos, batch_binaries = [], [], []
             batch_audios = []
             for conversation in conversations:
-                images, videos = [], []
+                images, videos, binaries_l = [], [], []
                 for message in conversation:
                     content = message.get("content") or []
                     if isinstance(content, str):
                         continue
                     visuals = [
                         content_block for content_block in content if content_block["type"] in ["image", "video"]
+                    ]
+                    binaries = [
+                        content_block for content_block in content if content_block["type"] in ["binary"]
                     ]
                     audio_fnames = [
                         content_block[key]
@@ -1839,6 +1841,14 @@ class ProcessorMixin(PushToHubMixin):
                     ]
                     videos.extend(video_fnames)
 
+                    binary_fnames = [
+                        binary_info[key]
+                        for binary_info in binaries
+                        for key in ["path"]
+                        if key in binary_info and binary_info["type"] == "binary"
+                    ]
+                    binaries_l.extend(binary_fnames)
+
                     # Audio models do not accept nested list of audios (yet!) so we construct a flat input audio list
                     if not load_audio_from_video:
                         for fname in audio_fnames:
@@ -1854,9 +1864,11 @@ class ProcessorMixin(PushToHubMixin):
                 # So we'll make a batched list of images and let the processor handle it
                 batch_images.append(images)
                 batch_videos.append(videos)
+                batch_binaries.append(binaries_l)
 
         # `kwargs` overwrite special tokens if both are present
         template_kwargs = {**self.tokenizer.special_tokens_map, **kwargs}
+
         prompt, generation_indices = render_jinja_template(
             conversations=conversations,
             tools=tools,
@@ -1885,7 +1897,7 @@ class ProcessorMixin(PushToHubMixin):
             # Always sample frames by default unless explicitly set to `False` by users. If users do not pass `num_frames`/`fps`
             # sampling should not done for BC.
             if "do_sample_frames" not in processor_kwargs and (
-                processor_kwargs.get("fps") is not None or processor_kwargs.get("num_frames") is not None
+                    processor_kwargs.get("fps") is not None or processor_kwargs.get("num_frames") is not None
             ):
                 processor_kwargs["do_sample_frames"] = True
 
@@ -1895,11 +1907,14 @@ class ProcessorMixin(PushToHubMixin):
 
             images_exist = any((im is not None) for im_list in batch_images for im in im_list)
             videos_exist = any((vid is not None) for vid_list in batch_videos for vid in vid_list)
+            binaries_exist = any((vid is not None) for vid_list in batch_binaries for vid in vid_list)
+            print("batch_binaries:", batch_binaries)
             out = self(
                 text=prompt,
                 images=batch_images if images_exist else None,
                 videos=batch_videos if videos_exist else None,
                 audio=batch_audios if batch_audios else None,
+                binaries=batch_binaries if binaries_exist else None,
                 **processor_kwargs,
             )
 
@@ -1917,9 +1932,9 @@ class ProcessorMixin(PushToHubMixin):
                             end_pos = bisect.bisect_left(offset_starts, assistant_end_char)
 
                             if not (
-                                start_pos >= 0
-                                and start_pos < len(offsets)
-                                and offsets[start_pos][0] <= assistant_start_char < offsets[start_pos][1]
+                                    start_pos >= 0
+                                    and start_pos < len(offsets)
+                                    and offsets[start_pos][0] <= assistant_start_char < offsets[start_pos][1]
                             ):
                                 # start_token is out of bounds maybe due to truncation.
                                 continue
@@ -1937,9 +1952,9 @@ class ProcessorMixin(PushToHubMixin):
         return prompt
 
     def parse_response(
-        self,
-        response: "str | list[str | int | list[int]] | np.ndarray | torch.Tensor",
-        schema: list | dict | None = None,
+            self,
+            response: "str | list[str | int | list[int]] | np.ndarray | torch.Tensor",
+            schema: list | dict | None = None,
     ):
         """
         Converts an output string created by generating text from a model into a parsed message dictionary.
@@ -1959,7 +1974,7 @@ class ProcessorMixin(PushToHubMixin):
         return self.tokenizer.parse_response(response, schema)
 
     def post_process_multimodal_output(
-        self, generated_outputs, skip_special_tokens=True, generation_mode=None, **kwargs
+            self, generated_outputs, skip_special_tokens=True, generation_mode=None, **kwargs
     ):
         """
         Post-process the output of a multimodal model to return the requested modality output.

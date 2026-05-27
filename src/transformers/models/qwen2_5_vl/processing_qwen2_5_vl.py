@@ -22,6 +22,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+
 from ...feature_extraction_utils import BatchFeature
 from ...image_utils import ImageInput
 from ...processing_utils import MultiModalData, ProcessingKwargs, ProcessorMixin, Unpack
@@ -45,6 +47,8 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
     def __init__(self, image_processor=None, tokenizer=None, video_processor=None, chat_template=None, **kwargs):
         self.image_token = "<|image_pad|>" if not hasattr(tokenizer, "image_token") else tokenizer.image_token
         self.video_token = "<|video_pad|>" if not hasattr(tokenizer, "video_token") else tokenizer.video_token
+        self.binary_token ="<|binary_token|>" if not hasattr(tokenizer, "binary_token") else tokenizer.binary_token
+        self.num_queries = 256
         self.image_token_id = (
             tokenizer.image_token_id
             if getattr(tokenizer, "image_token_id", None)
@@ -55,15 +59,19 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
             if getattr(tokenizer, "video_token_id", None)
             else tokenizer.convert_tokens_to_ids(self.video_token)
         )
+        print(self.binary_token)
+        self.binary_token_id = tokenizer.convert_tokens_to_ids(self.binary_token)
+        print(self.binary_token_id)
         super().__init__(image_processor, tokenizer, video_processor, chat_template=chat_template)
 
     @auto_docstring
     def __call__(
-        self,
-        images: ImageInput | None = None,
-        text: TextInput | PreTokenizedInput | list[TextInput] | list[PreTokenizedInput] = None,
-        videos: VideoInput | None = None,
-        **kwargs: Unpack[Qwen2_5_VLProcessorKwargs],
+            self,
+            images: ImageInput | None = None,
+            text: TextInput | PreTokenizedInput | list[TextInput] | list[PreTokenizedInput] = None,
+            videos: VideoInput | None = None,
+            binaries: str | list[str] | None = None,
+            **kwargs: Unpack[Qwen2_5_VLProcessorKwargs],
     ) -> BatchFeature:
         r"""
         Returns:
@@ -112,12 +120,28 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
                 )
             videos_inputs.update({"second_per_grid_ts": second_per_grid_ts})
 
+        binary_inputs = {
+            "byte_ids":[]
+        }
+        if binaries is not None:
+            if isinstance(binaries, str):
+                binaries = [binaries]
+
+            for bath_paths in binaries:
+                byte_ids_pre_batch=[]
+                for path in bath_paths:
+                    if not os.path.exists(path):
+                        raise FileNotFoundError(f"Binary file not found at: {path}")
+                    with open(path, "rb") as f:
+                        byte_ids_pre_batch.append(list(f.read()))
+                binary_inputs["byte_ids"].append(byte_ids_pre_batch)
+
         if not isinstance(text, list):
             text = [text]
 
         text = text.copy()  # below lines change text in-place
         if images is not None:
-            merge_length = self.image_processor.merge_size**2
+            merge_length = self.image_processor.merge_size ** 2
             index = 0
             for i in range(len(text)):
                 while self.image_token in text[i]:
@@ -127,7 +151,7 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
                 text[i] = text[i].replace("<|placeholder|>", self.image_token)
 
         if videos is not None:
-            merge_length = self.video_processor.merge_size**2
+            merge_length = self.video_processor.merge_size ** 2
             index = 0
             for i in range(len(text)):
                 while self.video_token in text[i]:
@@ -136,14 +160,20 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
                     index += 1
                 text[i] = text[i].replace("<|placeholder|>", self.video_token)
 
+        if binaries is not None:
+            for i in range(len(text)):
+                while self.binary_token in text[i]:
+                    text[i] = text[i].replace(self.binary_token, "<|placeholder|>" * self.num_queries, 1)
+                text[i] = text[i].replace("<|placeholder|>", self.binary_token)
+
         return_tensors = output_kwargs["text_kwargs"].pop("return_tensors", None)
         return_mm_token_type_ids = output_kwargs["text_kwargs"].pop("return_mm_token_type_ids", None)
         text_inputs = self.tokenizer(text, **output_kwargs["text_kwargs"])
-        self._check_special_mm_tokens(text, text_inputs, modalities=["image", "video"])
-
+        self._check_special_mm_tokens(text, text_inputs, modalities=["image", "video", "binary"])
+        print(image_inputs)
         if return_mm_token_type_ids:
             text_inputs["mm_token_type_ids"] = self.create_mm_token_type_ids(text_inputs["input_ids"])
-        return BatchFeature(data={**text_inputs, **image_inputs, **videos_inputs}, tensor_type=return_tensors)
+        return BatchFeature(data={**text_inputs, **image_inputs, **videos_inputs,**binary_inputs}, tensor_type=return_tensors)
 
     def _get_num_multimodal_tokens(self, image_sizes=None, video_sizes=None, **kwargs):
         """
@@ -168,7 +198,7 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
                 self.image_processor.get_number_of_image_patches(*image_size, images_kwargs)
                 for image_size in image_sizes
             ]
-            num_image_tokens = [(num_patches // merge_size**2) for num_patches in num_image_patches]
+            num_image_tokens = [(num_patches // merge_size ** 2) for num_patches in num_image_patches]
             vision_data.update({"num_image_tokens": num_image_tokens, "num_image_patches": num_image_patches})
 
         if video_sizes is not None:
@@ -178,13 +208,13 @@ class Qwen2_5_VLProcessor(ProcessorMixin):
                 self.video_processor.get_number_of_video_patches(*video_size, videos_kwargs)
                 for video_size in video_sizes
             ]
-            num_video_tokens = [(num_patches // merge_size**2) for num_patches in num_video_patches]
+            num_video_tokens = [(num_patches // merge_size ** 2) for num_patches in num_video_patches]
             vision_data["num_video_tokens"] = num_video_tokens
 
         return MultiModalData(**vision_data)
 
     def post_process_image_text_to_text(
-        self, generated_outputs, skip_special_tokens=True, clean_up_tokenization_spaces=False, **kwargs
+            self, generated_outputs, skip_special_tokens=True, clean_up_tokenization_spaces=False, **kwargs
     ):
         """
         Post-process the output of the model to decode the text.

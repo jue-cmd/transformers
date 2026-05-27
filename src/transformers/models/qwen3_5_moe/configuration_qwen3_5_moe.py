@@ -171,8 +171,11 @@ class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
     num_queries: int = 256
     encoder_dim: int = 1024
     downsample_factor: int = 16
-    out_hidden_size: int = 4096
+    out_hidden_size: int = 2048
     initializer_range: float = 0.02
+    embed_dim:int = 1024
+    num_heads:int = 8
+    llm_hidden_dim: int =2048
 
 
 @auto_docstring(checkpoint="Qwen/Qwen3.5-35B-A3B")
@@ -208,9 +211,9 @@ class Qwen3_5MoeConfig(PreTrainedConfig):
     vision_start_token_id: int = 248053
     vision_end_token_id: int = 248054
 
-    binary_token_id: int = 248058
-    binary_start_token_id: int = 248059
-    binary_end_token_id: int = 248060
+    binary_token_id: int = 248077
+    binary_start_token_id: int = 248078
+    binary_end_token_id: int = 248079
 
     tie_word_embeddings: bool = False
 

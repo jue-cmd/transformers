@@ -1441,7 +1441,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
         super().__init__(config)
         self.visual = Qwen3_5MoeVisionModel._from_config(config.vision_config)
         self.language_model = Qwen3_5MoeTextModel._from_config(config.text_config)
-        self.bin_model = BinaryByteModalEncoder(config.binary_config)
+        self.binary_encoder = BinaryByteModalEncoder(config.binary_config)
         self.rope_deltas = None  # cache rope_deltas here
 
         # Initialize weights and apply final processing
@@ -1702,7 +1702,7 @@ class Qwen3_5MoeModel(Qwen3_5MoePreTrainedModel):
                 inputs_embeds[special_video_mask].numel() == video_features.numel(),
                 f"Video features and video tokens do not match, tokens: {n_video_tokens}, features: {video_features.shape[0]}",
             )
-
+        print(special_binary_mask)
         n_binary_tokens = special_binary_mask.sum()
         special_binary_mask = special_binary_mask.unsqueeze(-1).expand_as(inputs_embeds).to(inputs_embeds.device)
         if binary_features is not None:
@@ -2102,6 +2102,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
             pixel_values_videos: torch.FloatTensor | None = None,
             image_grid_thw: torch.LongTensor | None = None,
             video_grid_thw: torch.LongTensor | None = None,
+            byte_ids:torch.LongTensor | None = None,
             mm_token_type_ids: torch.IntTensor | None = None,
             logits_to_keep: int | torch.Tensor = 0,
             **kwargs: Unpack[TransformersKwargs],
@@ -2168,6 +2169,7 @@ class Qwen3_5MoeForConditionalGeneration(Qwen3_5MoePreTrainedModel, GenerationMi
             attention_mask=attention_mask,
             past_key_values=past_key_values,
             inputs_embeds=inputs_embeds,
+            byte_ids=byte_ids,
             **kwargs,
         )
 

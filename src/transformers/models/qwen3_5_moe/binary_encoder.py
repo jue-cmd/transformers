@@ -85,46 +85,47 @@ class PerceiverResampler(nn.Module):
 
 
 class BinaryByteModalEncoder(nn.Module):
-    def __init__(self, num_queries=256, encoder_dim=512, downsample_factor=16, llm_hidden_dim=4096):
+    def __init__(self,config):
         super().__init__()
-        self.downsample_factor = downsample_factor
+        self.downsample_factor = config.downsample_factor
 
-        self.byte_embedding = nn.Embedding(256, encoder_dim)
+        self.byte_embedding = nn.Embedding(256, config.encoder_dim)
 
-        self.folding_proj = nn.Linear(encoder_dim * downsample_factor, encoder_dim)
+        self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
         self.encoder_layers = nn.ModuleList([
-            LinearAttentionBlock(dim=encoder_dim, heads=8) for _ in range(2)
+            LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(2)
         ])
 
-        self.resampler = PerceiverResampler(num_queries=num_queries, embed_dim=encoder_dim)
+        self.resampler = PerceiverResampler(config)
 
         self.projector = nn.Sequential(
-            nn.Linear(encoder_dim, encoder_dim * 2),
+            nn.Linear(config.encoder_dim, config.encoder_dim * 2),
             nn.GELU(),
-            nn.Linear(encoder_dim * 2, llm_hidden_dim)
+            nn.Linear(config.encoder_dim * 2, config.llm_hidden_dim)
         )
 
     def forward(self, byte_ids):
-        B, L = byte_ids.shape
-
+        # byte_ids 的原始形状: [B, N, L] -> [Batch大小, 每个样本的文件数, 每个文件的字节长度]
+        print("Original shape:", byte_ids.shape)
+        B, N, L = byte_ids.shape
+        byte_ids_flat = byte_ids.view(B * N, L)
         pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
         if pad_len > 0:
-            byte_ids = F.pad(byte_ids, (0, pad_len), value=0)
-            L = byte_ids.shape[1]
-
-        x = self.byte_embedding(byte_ids)
-
-        x = x.view(B, L // self.downsample_factor, self.downsample_factor * x.shape[-1])
+            byte_ids_flat = F.pad(byte_ids_flat, (0, pad_len), value=0)
+            L = byte_ids_flat.shape[1]
+        x = self.byte_embedding(byte_ids_flat)
+        E = x.shape[-1]
+        x = x.view(B * N, L // self.downsample_factor, self.downsample_factor * E)
         x = self.folding_proj(x)
-
         for layer in self.encoder_layers:
             x = layer(x)
-
         compressed_matrix = self.resampler(x)
-
-        llm_inputs = self.projector(compressed_matrix)
-
+        num_queries = compressed_matrix.shape[1]
+        llm_inputs_flat = self.projector(compressed_matrix)
+        LLM_Dim = llm_inputs_flat.shape[-1]
+        llm_inputs = llm_inputs_flat.view(B, N, num_queries, LLM_Dim)
+        print("Final output shape:", llm_inputs.shape)
         return llm_inputs
 
 
