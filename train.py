@@ -130,7 +130,6 @@ def main():
                     param.data.zero_()
 
     if hasattr(model.model, "binary_encoder"):
-        print("-> 执行 binary_encoder 控噪初始化...")
         model.model.binary_encoder.apply(rnn_and_linear_initializer)
 
     model.requires_grad_(False)
@@ -164,7 +163,6 @@ def main():
         data_collator=data_collator
     )
 
-    print("-> 启动训练（所有文本与 Tokenize 处理均在 Collator 中动态完成）...")
     trainer.train()
 
     # 8. 保存

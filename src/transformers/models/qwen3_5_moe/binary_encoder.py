@@ -85,7 +85,7 @@ class PerceiverResampler(nn.Module):
 
 
 class BinaryByteModalEncoder(nn.Module):
-    def __init__(self,config):
+    def __init__(self, config):
         super().__init__()
         self.downsample_factor = config.downsample_factor
 
@@ -96,6 +96,9 @@ class BinaryByteModalEncoder(nn.Module):
         self.encoder_layers = nn.ModuleList([
             LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(2)
         ])
+
+        self.pos_conv = nn.Conv1d(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
+                                  groups=config.encoder_dim)
 
         self.resampler = PerceiverResampler(config)
 
@@ -113,6 +116,12 @@ class BinaryByteModalEncoder(nn.Module):
             byte_ids_flat = F.pad(byte_ids_flat, (0, pad_len), value=0)
             L = byte_ids_flat.shape[1]
         x = self.byte_embedding(byte_ids_flat)
+
+        # 位置编码
+        x = x.transpose(1, 2)
+        x = self.pos_conv(x) + x
+        x = x.transpose(1, 2).contiguous()
+
         E = x.shape[-1]
         x = x.view(B * N, L // self.downsample_factor, self.downsample_factor * E)
         x = self.folding_proj(x)
