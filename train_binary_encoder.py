@@ -50,8 +50,6 @@ def load_binary_files(file_dir, chunk_size=1024):
 
 from transformers import TrainingArguments, Trainer, Qwen3_5MoeBinaryConfig
 
-
-
 config = Qwen3_5MoeBinaryConfig()
 encoder = BinaryByteModalEncoder(config)
 model = BinaryMLMPretrainWrapper(encoder, config)
