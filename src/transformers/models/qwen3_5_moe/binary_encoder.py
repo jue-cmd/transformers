@@ -63,14 +63,14 @@ class LinearAttentionBlock(nn.Module):
 class PerceiverResampler(nn.Module):
     def __init__(self, config: Qwen3_5MoeBinaryConfig):
         super().__init__()
-        self.queries = nn.Parameter(torch.randn(config.num_queries, config.embed_dim))
-        self.attn = nn.MultiheadAttention(config.embed_dim, config.num_heads, batch_first=True)
-        self.ln1 = nn.LayerNorm(config.embed_dim)
-        self.ln2 = nn.LayerNorm(config.embed_dim)
+        self.queries = nn.Parameter(torch.randn(config.num_queries, config.encoder_dim))
+        self.attn = nn.MultiheadAttention(config.encoder_dim, config.num_heads, batch_first=True)
+        self.ln1 = nn.LayerNorm(config.encoder_dim)
+        self.ln2 = nn.LayerNorm(config.encoder_dim)
         self.mlp = nn.Sequential(
-            nn.Linear(config.embed_dim, config.embed_dim * 4),
+            nn.Linear(config.encoder_dim, config.encoder_dim * 4),
             nn.GELU(),
-            nn.Linear(config.embed_dim * 4, config.embed_dim)
+            nn.Linear(config.encoder_dim * 4, config.encoder_dim)
         )
 
     def forward(self, x):
@@ -100,6 +100,33 @@ class BinaryByteModalEncoder(nn.Module):
         self.pos_conv = nn.Conv1d(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
                                   groups=config.encoder_dim)
 
+    def forward(self, byte_ids):
+        B, L = byte_ids.shape
+        pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
+        if pad_len > 0:
+            byte_ids = F.pad(byte_ids, (0, pad_len), value=0)
+            L = byte_ids.shape[1]
+        x = self.byte_embedding(byte_ids)
+
+        # 位置编码
+        x = x.transpose(1, 2)
+        x = self.pos_conv(x) + x
+        x = x.transpose(1, 2).contiguous()
+
+        E = x.shape[-1]
+        x = x.view(B, L // self.downsample_factor, self.downsample_factor * E)
+        x = self.folding_proj(x)
+        for layer in self.encoder_layers:
+            x = layer(x)
+        return x
+
+
+class BinaryEncoderForLLm(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+
+        self.model = BinaryByteModalEncoder(config)
         self.resampler = PerceiverResampler(config)
 
         self.projector = nn.Sequential(
@@ -111,36 +138,49 @@ class BinaryByteModalEncoder(nn.Module):
     def forward(self, byte_ids):
         B, N, L = byte_ids.shape
         byte_ids_flat = byte_ids.view(B * N, L)
-        pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
-        if pad_len > 0:
-            byte_ids_flat = F.pad(byte_ids_flat, (0, pad_len), value=0)
-            L = byte_ids_flat.shape[1]
-        x = self.byte_embedding(byte_ids_flat)
-
-        # 位置编码
-        x = x.transpose(1, 2)
-        x = self.pos_conv(x) + x
-        x = x.transpose(1, 2).contiguous()
-
-        E = x.shape[-1]
-        x = x.view(B * N, L // self.downsample_factor, self.downsample_factor * E)
-        x = self.folding_proj(x)
-        for layer in self.encoder_layers:
-            x = layer(x)
+        x = self.model(byte_ids_flat)
         compressed_matrix = self.resampler(x)
-        num_queries = compressed_matrix.shape[1]
+
         llm_inputs_flat = self.projector(compressed_matrix)
-        LLM_Dim = llm_inputs_flat.shape[-1]
-        llm_inputs = llm_inputs_flat.view(B, N, num_queries, LLM_Dim)
-        print(llm_inputs)
+        llm_dim = llm_inputs_flat.shape[-1]
+
+        num_queries = compressed_matrix.shape[1]
+        llm_inputs = llm_inputs_flat.view(B, N, num_queries, llm_dim)
         return llm_inputs
 
 
-if __name__ == "__main__":
-    mock_binary_file = torch.randint(0, 256, (2, 1048576))
-    encoder = BinaryByteModalEncoder(num_queries=256, encoder_dim=1024, downsample_factor=16, llm_hidden_dim=4096)
+class BinaryMLMPretrainWrapper(nn.Module):
+    """
+    掩码/全文语言模型预训练包装器
+    专门针对 PE/ELF 等具备全局关联性的二进制结构设计。
+    支持对序列中的任意部分（包含尾部特定字符）进行多标签分类预测（0-255）。
+    """
 
-    with torch.no_grad():
-        hidden_states = encoder(mock_binary_file)
+    def __init__(self, encoder: BinaryByteModalEncoder, config):
+        super().__init__()
+        self.encoder = encoder
+        self.downsample_factor = config.downsample_factor
 
-    print(hidden_states.shape)
+        self.mlm_head = nn.Sequential(
+            nn.Linear(config.encoder_dim, config.encoder_dim * 2),
+            nn.GELU(),
+            nn.LayerNorm(config.encoder_dim * 2),
+            nn.Linear(config.encoder_dim * 2, config.downsample_factor * 256)
+        )
+
+    def forward(self, byte_ids):
+        """
+        Args:
+            byte_ids: [B, L] 或者是带掩码处理后的 byte_ids
+        Returns:
+            logits: [B, L_padded, 256] 对应全文所有字节位置的预测概率
+        """
+        B, L = byte_ids.shape
+
+        x = self.encoder(byte_ids)
+        L_compressed = x.shape[1]
+        logits = self.mlm_head(x)
+        logits = logits.view(B, L_compressed * self.downsample_factor, 256)
+        logits = logits[:, :L, :]
+
+        return logits
