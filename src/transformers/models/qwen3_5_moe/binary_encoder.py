@@ -94,7 +94,7 @@ class BinaryByteModalEncoder(nn.Module):
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
         self.encoder_layers = nn.ModuleList([
-            LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(2)
+            LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(config.attn_nums)
         ])
 
         self.pos_conv = nn.Conv1d(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,

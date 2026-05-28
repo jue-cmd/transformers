@@ -48,17 +48,11 @@ def load_binary_files(file_dir, chunk_size=1024):
     return Dataset.from_dict({"byte_ids": all_chunks})
 
 
-from transformers import TrainingArguments, Trainer
+from transformers import TrainingArguments, Trainer, Qwen3_5MoeBinaryConfig
 
 
-# 1. 伪造一个你的自定义配置类
-class MockConfig:
-    downsample_factor = 8  # 压缩率
-    encoder_dim = 256  # 特征维度
-    llm_hidden_dim = 1024  # 预留给后端大模型的维度
 
-
-config = MockConfig()
+config = Qwen3_5MoeBinaryConfig()
 encoder = BinaryByteModalEncoder(config)
 model = BinaryMLMPretrainWrapper(encoder, config)
 

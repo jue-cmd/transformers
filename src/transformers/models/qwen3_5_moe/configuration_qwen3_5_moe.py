@@ -173,9 +173,9 @@ class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
     downsample_factor: int = 16
     out_hidden_size: int = 2048
     initializer_range: float = 0.02
-    embed_dim:int = 1024
-    num_heads:int = 8
-    llm_hidden_dim: int =2048
+    num_heads: int = 8
+    llm_hidden_dim: int = 2048
+    attn_nums: int = 4
 
 
 @auto_docstring(checkpoint="Qwen/Qwen3.5-35B-A3B")
