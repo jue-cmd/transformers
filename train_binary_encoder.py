@@ -64,13 +64,12 @@ training_args = TrainingArguments(
     output_dir="./binary_mlm_output",
     num_train_epochs=5,
     per_device_train_batch_size=32,
-    per_device_eval_batch_size=32,
     save_strategy="epoch",
     learning_rate=1e-4,
     weight_decay=0.01,
-    logging_steps=100,
+    logging_steps=1,
     fp16=torch.cuda.is_available(),
-    report_to="wandb"
+    report_to="wandb",
 )
 
 trainer = Trainer(
