@@ -1,7 +1,7 @@
 from transformers import Qwen3_5MoeBinaryConfig
 
 import torch
-from torch import  nn
+from torch import nn
 import torch.nn.functional as F
 
 
@@ -36,8 +36,8 @@ class LinearAttention(nn.Module):
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = torch.sigmoid(self.g_proj(x))
 
-        q = F.silu(q)
-        k = F.silu(k)
+        q = F.silu(q) + 1
+        k = F.silu(k) + 1
 
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
