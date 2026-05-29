@@ -1,8 +1,5 @@
-import random
 import torch
 import tqdm
-import wandb
-from torch import nn
 import os
 from datasets import Dataset
 
@@ -32,9 +29,6 @@ class BinaryMLMDataCollator:
         }
 
 
-import os
-import tqdm
-from datasets import Dataset
 
 
 def binary_chunks_generator(file_dir, chunk_size=1024):
@@ -46,6 +40,7 @@ def binary_chunks_generator(file_dir, chunk_size=1024):
             file_path = os.path.join(root, file)
             try:
                 with open(file_path, 'rb') as f:
+                    print(file_path)
                     while True:
                         chunk = f.read(chunk_size)
                         if not chunk:
