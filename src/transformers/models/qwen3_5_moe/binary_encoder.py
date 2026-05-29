@@ -1,8 +1,8 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
 from transformers import Qwen3_5MoeBinaryConfig
+
+import torch
+from torch import  nn
+import torch.nn.functional as F
 
 
 class LinearAttention(nn.Module):
@@ -15,31 +15,36 @@ class LinearAttention(nn.Module):
         self.q_proj = nn.Linear(dim, dim, bias=False)
         self.k_proj = nn.Linear(dim, dim, bias=False)
         self.v_proj = nn.Linear(dim, dim, bias=False)
+
+        self.g_proj = nn.Linear(dim, dim, bias=False)
         self.out_proj = nn.Linear(dim, dim)
+
+        self.feature_norm = nn.RMSNorm(self.head_dim, eps=1e-5)
+        self._init_weights()
+
+    def _init_weights(self):
+        for proj in [self.q_proj, self.k_proj, self.v_proj, self.g_proj]:
+            nn.init.normal_(proj.weight, mean=0.0, std=0.02)
+        nn.init.normal_(self.out_proj.weight, mean=0.0, std=0.02)
 
     def forward(self, x):
         B, N, D = x.shape
         H, HD = self.heads, self.head_dim
 
-        # [B, N, D] -> [B, H, N, HD]
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
+        g = torch.sigmoid(self.g_proj(x))
 
-        # Kernel feature map: ensure positivity for linear attention
-        q = F.elu(q) + 1.0  # [B, H, N, HD]
-        k = F.elu(k) + 1.0  # [B, H, N, HD]
+        q = F.silu(q)
+        k = F.silu(k)
 
-        # Linear attention: (Q(K^T V)) / (Q sum(K))
-        kv = torch.matmul(k.transpose(-2, -1), v)  # [B, H, HD, HD]
-        k_sum = k.sum(dim=-2, keepdim=True)  # [B, H, 1, HD]
+        kv = torch.matmul(k.transpose(-2, -1), v)
+        out = torch.matmul(q, kv)
+        out = out.transpose(1, 2).contiguous().view(B * N, H, HD)
+        out = self.feature_norm(out).view(B, N, D)
 
-        num = torch.matmul(q, kv)  # [B, H, N, HD]
-        denom = torch.matmul(q, k_sum.transpose(-2, -1))  # [B, H, N, 1]
-
-        out = num / (denom + 1e-6)  # [B, H, N, HD]
-        out = out.transpose(1, 2).contiguous().view(B, N, D)
-        return self.out_proj(out)
+        return self.out_proj(out * g)
 
 
 class LinearAttentionBlock(nn.Module):
@@ -89,7 +94,7 @@ class BinaryByteModalEncoder(nn.Module):
         super().__init__()
         self.downsample_factor = config.downsample_factor
 
-        self.byte_embedding = nn.Embedding(256, config.encoder_dim)
+        self.byte_embedding = nn.Embedding(257, config.encoder_dim)
 
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
@@ -168,19 +173,17 @@ class BinaryMLMPretrainWrapper(nn.Module):
             nn.Linear(config.encoder_dim * 2, config.downsample_factor * 256)
         )
 
-    def forward(self, byte_ids):
-        """
-        Args:
-            byte_ids: [B, L] 或者是带掩码处理后的 byte_ids
-        Returns:
-            logits: [B, L_padded, 256] 对应全文所有字节位置的预测概率
-        """
+    def forward(self, byte_ids, labels=None):
         B, L = byte_ids.shape
-
         x = self.encoder(byte_ids)
         L_compressed = x.shape[1]
         logits = self.mlm_head(x)
         logits = logits.view(B, L_compressed * self.downsample_factor, 256)
         logits = logits[:, :L, :]
-
+        loss = None
+        if labels is not None:
+            loss_fct = nn.CrossEntropyLoss()
+            loss = loss_fct(logits.view(-1, 256), labels.view(-1))
+        if loss is not None:
+            return loss, logits
         return logits
