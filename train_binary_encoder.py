@@ -29,8 +29,6 @@ class BinaryMLMDataCollator:
         }
 
 
-
-
 def binary_chunks_generator(file_dir, chunk_size=1024):
     for root, _, files in os.walk(file_dir):
         for file in tqdm.tqdm(files, desc="Processing files"):
@@ -62,6 +60,9 @@ def load_binary_files(file_dir, chunk_size=2048):
 from transformers import TrainingArguments, Trainer, Qwen3_5MoeBinaryConfig
 
 config = Qwen3_5MoeBinaryConfig()
+
+
+
 encoder = BinaryByteModalEncoder(config)
 model = BinaryMLMPretrainWrapper(encoder, config)
 

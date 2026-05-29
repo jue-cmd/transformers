@@ -36,8 +36,8 @@ class LinearAttention(nn.Module):
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = torch.sigmoid(self.g_proj(x))
 
-        q = F.silu(q) + 1
-        k = F.silu(k) + 1
+        q = torch.softmax(q, dim=-1)
+        k = torch.softmax(k, dim=-1)
 
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
