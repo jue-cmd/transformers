@@ -76,12 +76,12 @@ training_args = TrainingArguments(
     num_train_epochs=5,
     per_device_train_batch_size=4,
     save_strategy="epoch",
-    learning_rate=2e-4,
+    learning_rate=3e-5,
     weight_decay=0.01,
     logging_steps=1,
     fp16=torch.cuda.is_available(),
     report_to="wandb",
-    warmup_ratio=0.05,
+    warmup_ratio=0.1,
     max_grad_norm=1.0,
 )
 
