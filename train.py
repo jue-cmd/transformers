@@ -165,7 +165,6 @@ def main():
 
     trainer.train()
 
-    # 8. 保存
     trainer.save_model(OUTPUT_DIR)
     tokenizer.save_pretrained(OUTPUT_DIR)
     print(f"-> 成功保存至 {OUTPUT_DIR}")
