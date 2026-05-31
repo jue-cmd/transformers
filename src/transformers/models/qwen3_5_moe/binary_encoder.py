@@ -1,5 +1,3 @@
-from gitdb.fun import chunk_size
-
 from transformers import Qwen3_5MoeBinaryConfig
 import torch
 import torch.nn as nn
@@ -45,8 +43,6 @@ class LinearAttention(nn.Module):
             k_chunk = k[:, :, i:i + chunk_size, :]
             v_chunk = v[:, :, i:i + chunk_size, :]
             chunk_kv = torch.matmul(k_chunk.transpose(-2, -1), v_chunk)
-            if kv_state.dtype != chunk_kv.dtype:
-                kv_state = kv_state.to(chunk_kv.dtype)
             out_chunk = torch.matmul(q_chunk, kv_state + chunk_kv)
             output_chunks.append(out_chunk)
             kv_state = kv_state + chunk_kv
@@ -63,6 +59,7 @@ class LinearAttentionBlock(nn.Module):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
         self.attn = LinearAttention(dim, heads=heads)
+        self.chunk_size = chunk_size
         self.ln2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -71,7 +68,7 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = self.attn(self.ln1(x), chunk_size=chunk_size) + x
+        x = self.attn(self.ln1(x), chunk_size=self.chunk_size) + x
         x = self.mlp(self.ln2(x)) + x
         return x
 
@@ -91,9 +88,7 @@ class PerceiverResampler(nn.Module):
 
     def forward(self, x):
         B = x.shape[0]
-
         queries = self.queries.unsqueeze(0).repeat(B, 1, 1)
-
         attn_out, _ = self.attn(query=queries, key=x, value=x)
         x = queries + self.ln1(attn_out)
         x = self.mlp(self.ln2(x)) + x
@@ -103,16 +98,13 @@ class PerceiverResampler(nn.Module):
 class BytePositionalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
-        kwargs['padding'] = 0
         self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
-        self.padding_size = kernel_size // 2
 
     def forward(self, x):
         if self.conv.weight.dtype != x.dtype or self.conv.weight.device != x.device:
             self.conv.to(device=x.device, dtype=x.dtype)
         x_t = x.transpose(1, 2)
-        x_padded = F.pad(x_t, (self.padding_size, self.padding_size), mode='constant', value=0)
-        out_t = self.conv(x_padded)
+        out_t = self.conv(x_t)
         return out_t.transpose(1, 2)
 
 
@@ -146,7 +138,7 @@ class BinaryByteModalEncoder(nn.Module):
         E = x.shape[-1]
         K = self.downsample_factor
 
-        x = x.view(B, E, L // K, K).permute(0, 2, 3, 1).reshape(B, L // K, K * E)
+        x = x.reshape(B, E, L // K, K).permute(0, 2, 3, 1).reshape(B, L // K, K * E)
         x = self.folding_proj(x)
         for layer in self.encoder_layers:
             x = layer(x)

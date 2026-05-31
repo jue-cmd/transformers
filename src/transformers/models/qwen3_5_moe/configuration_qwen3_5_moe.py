@@ -169,13 +169,13 @@ class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
     base_config_key = "binary_config"
 
     num_queries: int = 256
-    encoder_dim: int = 2048
+    encoder_dim: int = 1024
     downsample_factor: int = 2
     out_hidden_size: int = 2048
     initializer_range: float = 0.02
     num_heads: int = 8
     llm_hidden_dim: int = 2048
-    attn_nums: int = 4
+    attn_nums: int = 6
     attn_chunk_size: int = 1024 * 512
     #pos_emb_chunk_size: int = 1024 * 1024
 
