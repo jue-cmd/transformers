@@ -9,7 +9,7 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1024*50):
+    def __init__(self, dim, heads=8, chunk_size=1024 * 50):
         super().__init__()
         self.heads = heads
         self.dim = dim
@@ -75,8 +75,8 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = x + self.attn(self.ln1(x))
-        x = x + self.mlp(self.ln2(x))
+        x += self.attn(self.ln1(x))
+        x += self.mlp(self.ln2(x))
         return x
 
 
@@ -100,7 +100,7 @@ class PerceiverResampler(nn.Module):
 
         attn_out, _ = self.attn(query=queries, key=x, value=x)
         x = queries + self.ln1(attn_out)
-        x = x + self.mlp(self.ln2(x))
+        x += self.mlp(self.ln2(x))
         return x
 
 
@@ -128,13 +128,14 @@ class BinaryByteModalEncoder(nn.Module):
             L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
-        # 位置编码
         x = x.transpose(1, 2)
-        x = self.pos_conv(x) + x
+        x += self.pos_conv(x)
         x = x.transpose(1, 2).contiguous()
 
         E = x.shape[-1]
-        x = x.view(B, L // self.downsample_factor, self.downsample_factor * E)
+        K = self.downsample_factor
+
+        x = x.view(B, E, L // K, K).permute(0, 2, 3, 1).reshape(B, L // K, K * E)
         x = self.folding_proj(x)
         for layer in self.encoder_layers:
             x = layer(x)
