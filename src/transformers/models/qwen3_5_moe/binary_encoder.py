@@ -1,3 +1,5 @@
+from gitdb.fun import chunk_size
+
 from transformers import Qwen3_5MoeBinaryConfig
 import torch
 import torch.nn as nn
@@ -5,12 +7,11 @@ import torch.nn.functional as F
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1024 * 512):
+    def __init__(self, dim, heads=8):
         super().__init__()
         self.heads = heads
         self.dim = dim
         self.head_dim = dim // heads
-        self.chunk_size = chunk_size
 
         self.q_proj = nn.Linear(dim, dim, bias=False)
         self.k_proj = nn.Linear(dim, dim, bias=False)
@@ -25,11 +26,9 @@ class LinearAttention(nn.Module):
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.g_proj, self.out_proj]:
             nn.init.normal_(proj.weight, mean=0.0, std=0.02)
 
-    def forward(self, x):
+    def forward(self, x, chunk_size=1024 * 512):
         B, N, D = x.shape
         H, HD = self.heads, self.head_dim
-        C = self.chunk_size
-
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
@@ -37,13 +36,14 @@ class LinearAttention(nn.Module):
 
         q = torch.sigmoid(q)
         k = torch.sigmoid(k)
+
         kv_state = torch.zeros(B, H, HD, HD, dtype=x.dtype, device=x.device)
         output_chunks = []
-
-        for i in range(0, N, C):
-            q_chunk = q[:, :, i:i + C, :]
-            k_chunk = k[:, :, i:i + C, :]
-            v_chunk = v[:, :, i:i + C, :]
+        chunk_size = 1 if not self.training else chunk_size
+        for i in range(0, N, chunk_size):
+            q_chunk = q[:, :, i:i + chunk_size, :]
+            k_chunk = k[:, :, i:i + chunk_size, :]
+            v_chunk = v[:, :, i:i + chunk_size, :]
             chunk_kv = torch.matmul(k_chunk.transpose(-2, -1), v_chunk)
             if kv_state.dtype != chunk_kv.dtype:
                 kv_state = kv_state.to(chunk_kv.dtype)
@@ -62,7 +62,7 @@ class LinearAttentionBlock(nn.Module):
     def __init__(self, dim, heads=8, chunk_size=1024 * 512):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
-        self.attn = LinearAttention(dim, heads=heads, chunk_size=chunk_size)
+        self.attn = LinearAttention(dim, heads=heads)
         self.ln2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -71,7 +71,7 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = self.attn(self.ln1(x)) + x
+        x = self.attn(self.ln1(x), chunk_size=chunk_size) + x
         x = self.mlp(self.ln2(x)) + x
         return x
 
