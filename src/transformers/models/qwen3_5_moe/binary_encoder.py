@@ -104,13 +104,7 @@ class PerceiverResampler(nn.Module):
         x = self.mlp(self.ln2(x)) + x
         return x
 
-
-import torch
-import torch.nn as nn
-import math
-
-
-class BytePositionalConvHFCompatible(nn.Module):
+class BytePositionalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
         self.kernel_size = kernel_size
