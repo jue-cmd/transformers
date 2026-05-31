@@ -3,7 +3,6 @@ from transformers import Qwen3_5MoeBinaryConfig
 import torch
 from torch import nn
 import torch.nn.functional as F
-
 import torch
 import torch.nn as nn
 
@@ -75,8 +74,8 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x += self.attn(self.ln1(x))
-        x += self.mlp(self.ln2(x))
+        x = self.attn(self.ln1(x)) + x
+        x = self.mlp(self.ln2(x)) + x
         return x
 
 
@@ -100,7 +99,7 @@ class PerceiverResampler(nn.Module):
 
         attn_out, _ = self.attn(query=queries, key=x, value=x)
         x = queries + self.ln1(attn_out)
-        x += self.mlp(self.ln2(x))
+        x = self.mlp(self.ln2(x)) +x
         return x
 
 
