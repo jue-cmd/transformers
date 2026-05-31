@@ -1,3 +1,5 @@
+import math
+
 from transformers import Qwen3_5MoeBinaryConfig
 
 import torch
@@ -8,7 +10,7 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1024 * 50):
+    def __init__(self, dim, heads=8, chunk_size=1):
         super().__init__()
         self.heads = heads
         self.dim = dim
@@ -102,31 +104,30 @@ class PerceiverResampler(nn.Module):
         x = self.mlp(self.ln2(x)) + x
         return x
 
-
-class BytePositionalConvHFCompatible(nn.Module):
-    def __init__(self, *args, **kwargs):
-        kwargs['padding'] = 0
+class BytePositionalConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
-        self.conv = nn.Conv1d(*args, **kwargs)
+        self.kernel_size = kernel_size
+        self.padding_size = kernel_size // 2  # 对于 kernel=5，这里是 2
+        self.weight = nn.Parameter(torch.Tensor(in_channels, kernel_size))
+        if kwargs.get('bias', True):
+            self.bias = nn.Parameter(torch.Tensor(in_channels))
+        else:
+            self.register_parameter('bias', None)
 
-    def forward(self, x, chunk_size=4096):
-        B, L, E = x.shape
-        outputs = []
-        if L <= chunk_size:
-            x_padded = torch.nn.functional.pad(x.transpose(1, 2), (self.padding_size, self.padding_size),
-                                               mode='constant', value=0)
-            return self.conv(x_padded).transpose(1, 2)
-        for i in range(0, L, chunk_size):
-            start = max(0, i - 2)
-            end = min(L, i + chunk_size + 2)
-            chunk = x[:, start:end, :]
-            chunk_t = chunk.transpose(1, 2).contiguous()
-            conv_chunk = self.conv(chunk_t)
-            conv_chunk = conv_chunk.transpose(1, 2)
-            crop_start = i - start
-            crop_end = crop_start + min(chunk_size, L - i)
-            outputs.append(conv_chunk[:, crop_start:crop_end, :])
-        return torch.cat(outputs, dim=1)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            nn.init.zeros_(self.bias)
+
+    def forward(self, x):
+        x_pad = torch.nn.functional.pad(x, (0, 0, self.padding_size, self.padding_size), mode='constant', value=0)
+        x_windows = x_pad.unfold(dimension=1, size=self.kernel_size, step=1)
+        out = torch.einsum('blek,ek->ble', x_windows, self.weight)
+
+        return out
 
 
 class BinaryByteModalEncoder(nn.Module):
@@ -142,8 +143,8 @@ class BinaryByteModalEncoder(nn.Module):
             LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(config.attn_nums)
         ])
 
-        self.pos_conv = BytePositionalConvHFCompatible(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
-                                  groups=config.encoder_dim)
+        self.pos_conv = BytePositionalConv(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
+                                                       groups=config.encoder_dim)
 
     def forward(self, byte_ids):
         B, L = byte_ids.shape
