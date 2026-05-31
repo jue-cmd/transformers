@@ -124,7 +124,7 @@ class BytePositionalConv(nn.Module):
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 
-    def forward(self, x, eval_chunk_size=32768):
+    def forward(self, x, eval_chunk_size=1024*128):
         B, L, E = x.shape
         x_pad = torch.nn.functional.pad(x, (0, 0, self.padding_size, self.padding_size), mode='constant', value=0)
         x_windows = x_pad.unfold(dimension=1, size=self.kernel_size, step=1)  # [B, L, E, 5]
