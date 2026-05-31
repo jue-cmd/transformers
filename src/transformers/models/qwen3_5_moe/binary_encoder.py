@@ -9,7 +9,7 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=2048):
+    def __init__(self, dim, heads=8, chunk_size=512):
         super().__init__()
         self.heads = heads
         self.dim = dim
@@ -59,7 +59,6 @@ class LinearAttention(nn.Module):
         out = self.feature_norm(out)
         out = out.transpose(1, 2).contiguous().view(B, N, D)
         out.mul_(g)
-
         return self.out_proj(out)
 
 
