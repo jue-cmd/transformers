@@ -105,12 +105,17 @@ class PerceiverResampler(nn.Module):
 
 class BytePositionalConvHFCompatible(nn.Module):
     def __init__(self, *args, **kwargs):
+        kwargs['padding'] = 0
         super().__init__()
         self.conv = nn.Conv1d(*args, **kwargs)
 
     def forward(self, x, chunk_size=4096):
         B, L, E = x.shape
         outputs = []
+        if L <= chunk_size:
+            x_padded = torch.nn.functional.pad(x.transpose(1, 2), (self.padding_size, self.padding_size),
+                                               mode='constant', value=0)
+            return self.conv(x_padded).transpose(1, 2)
         for i in range(0, L, chunk_size):
             start = max(0, i - 2)
             end = min(L, i + chunk_size + 2)
@@ -137,7 +142,7 @@ class BinaryByteModalEncoder(nn.Module):
             LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(config.attn_nums)
         ])
 
-        self.pos_conv = nn.Conv1d(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
+        self.pos_conv = BytePositionalConvHFCompatible(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
                                   groups=config.encoder_dim)
 
     def forward(self, byte_ids):
