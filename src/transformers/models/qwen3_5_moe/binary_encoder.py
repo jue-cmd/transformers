@@ -104,43 +104,27 @@ class PerceiverResampler(nn.Module):
         x = self.mlp(self.ln2(x)) + x
         return x
 
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
 class BytePositionalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
-        self.kernel_size = kernel_size
-        self.padding_size = kernel_size // 2  # kernel=5 时为 2
+        kwargs['padding'] = 0
+        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
+        self.padding_size = kernel_size // 2
 
-        # 保持全连接层权重
-        self.weight = nn.Parameter(torch.Tensor(in_channels, kernel_size))
-        if kwargs.get('bias', True):
-            self.bias = nn.Parameter(torch.Tensor(in_channels))
-        else:
-            self.register_parameter('bias', None)
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        if self.bias is not None:
-            nn.init.zeros_(self.bias)
-
-    def forward(self, x, eval_chunk_size=1024*1024):
-        self.weight.data = self.weight.data.to(dtype=x.dtype, device=x.device)
-        if self.bias is not None:
-            self.bias.data = self.bias.data.to(dtype=x.dtype, device=x.device)
+    def forward(self, x, eval_chunk_size=None):
         B, L, E = x.shape
-        x_pad = torch.nn.functional.pad(x, (0, 0, self.padding_size, self.padding_size), mode='constant', value=0)
-        x_windows = x_pad.unfold(dimension=1, size=self.kernel_size, step=1)  # [B, L, E, 5]
-        sub_chunks = []
-        for i in range(0, L, eval_chunk_size):
-            chunk_win = x_windows[:, i: i + eval_chunk_size, :, :]
-            chunk_out = torch.einsum('blek,ek->ble', chunk_win, self.weight)
-            sub_chunks.append(chunk_out)
-        out = torch.cat(sub_chunks, dim=1)
-        if self.bias is not None:
-            out += self.bias
-        return out
-
+        if self.conv.weight.dtype != x.dtype or self.conv.weight.device != x.device:
+            self.conv.to(device=x.device, dtype=x.dtype)
+        x_t = x.transpose(1, 2)
+        x_padded = F.pad(x_t, (self.padding_size, self.padding_size), mode='constant', value=0)
+        out_t = self.conv(x_padded)
+        return out_t.transpose(1, 2)
 
 class BinaryByteModalEncoder(nn.Module):
     def __init__(self, config):
