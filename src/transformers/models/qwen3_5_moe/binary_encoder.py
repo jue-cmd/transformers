@@ -99,8 +99,29 @@ class PerceiverResampler(nn.Module):
 
         attn_out, _ = self.attn(query=queries, key=x, value=x)
         x = queries + self.ln1(attn_out)
-        x = self.mlp(self.ln2(x)) +x
+        x = self.mlp(self.ln2(x)) + x
         return x
+
+
+class BytePositionalConvHFCompatible(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.conv = nn.Conv1d(*args, **kwargs)
+
+    def forward(self, x, chunk_size=4096):
+        B, L, E = x.shape
+        outputs = []
+        for i in range(0, L, chunk_size):
+            start = max(0, i - 2)
+            end = min(L, i + chunk_size + 2)
+            chunk = x[:, start:end, :]
+            chunk_t = chunk.transpose(1, 2).contiguous()
+            conv_chunk = self.conv(chunk_t)
+            conv_chunk = conv_chunk.transpose(1, 2)
+            crop_start = i - start
+            crop_end = crop_start + min(chunk_size, L - i)
+            outputs.append(conv_chunk[:, crop_start:crop_end, :])
+        return torch.cat(outputs, dim=1)
 
 
 class BinaryByteModalEncoder(nn.Module):
@@ -119,6 +140,24 @@ class BinaryByteModalEncoder(nn.Module):
         self.pos_conv = nn.Conv1d(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
                                   groups=config.encoder_dim)
 
+    def _chunk_pos_conv(self, x, chunk_size=4096):
+        B, E, L = x.shape
+        padding = 2
+        outputs = []
+
+        for i in range(0, L, chunk_size):
+            start = max(0, i - padding)
+            end = min(L, i + chunk_size + padding)
+
+            x_chunk = x[:, :, start:end]
+            out_chunk = self.pos_conv(x_chunk)
+
+            crop_start = i - start
+            crop_end = crop_start + min(chunk_size, L - i)
+            outputs.append(out_chunk[:, :, crop_start:crop_end])
+
+        return torch.cat(outputs, dim=-1)
+
     def forward(self, byte_ids):
         B, L = byte_ids.shape
         pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
@@ -127,9 +166,7 @@ class BinaryByteModalEncoder(nn.Module):
             L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
-        x = x.transpose(1, 2)
-        x += self.pos_conv(x)
-        x = x.transpose(1, 2).contiguous()
+        x += self._chunk_pos_conv(x)
 
         E = x.shape[-1]
         K = self.downsample_factor
