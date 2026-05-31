@@ -5,6 +5,37 @@ from datasets import Dataset
 
 from transformers.models.qwen3_5_moe.binary_encoder import BinaryByteModalEncoder, BinaryMLMPretrainWrapper
 
+from transformers import TrainerCallback
+
+
+class PyTorchProfilerCallback(TrainerCallback):
+    def __init__(self, output_dir="./log/profiler"):
+        self.output_dir = output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        self.prof = None
+
+    def on_train_begin(self, args, state, control, **kwargs):
+        self.prof = torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(wait=2, warmup=2, active=1, repeat=1),
+            profile_memory=True,
+            with_stack=True,
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(self.output_dir)
+        )
+        self.prof.start()
+        print(f"\n[Profiler] 性能分析器已启动！日志将保存至: {self.output_dir} 喵～")
+
+    def on_step_end(self, args, state, control, **kwargs):
+        if self.prof:
+            self.prof.step()
+        if state.global_step == 5:
+            if self.prof:
+                self.prof.stop()
+                self.prof = None
+                print("\n[Profiler] 性能分析完成并已成功导出！正在安全关闭 喵～")
 
 class BinaryMLMDataCollator:
     def __init__(self, mask_prob=0.15, mask_token_id=256):
@@ -86,6 +117,7 @@ training_args = TrainingArguments(
     report_to="wandb",
     warmup_ratio=0.1,
     max_grad_norm=1.0,
+
 )
 
 trainer = Trainer(

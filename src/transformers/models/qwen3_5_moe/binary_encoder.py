@@ -9,12 +9,11 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=2048):
+    def __init__(self, dim, heads=8):
         super().__init__()
         self.heads = heads
         self.dim = dim
         self.head_dim = dim // heads
-        self.chunk_size = chunk_size
 
         self.q_proj = nn.Linear(dim, dim, bias=False)
         self.k_proj = nn.Linear(dim, dim, bias=False)
@@ -32,7 +31,6 @@ class LinearAttention(nn.Module):
     def forward(self, x):
         B, N, D = x.shape
         H, HD = self.heads, self.head_dim
-        C = self.chunk_size
 
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
@@ -45,10 +43,10 @@ class LinearAttention(nn.Module):
         kv_state = torch.zeros(B, H, HD, HD, dtype=x.dtype, device=x.device)
         output_chunks = []
 
-        for i in range(0, N, C):
-            q_chunk = q[:, :, i:i + C, :]
-            k_chunk = k[:, :, i:i + C, :]
-            v_chunk = v[:, :, i:i + C, :]
+        for i in range(0, N):
+            q_chunk = q[:, :, i]
+            k_chunk = k[:, :, i]
+            v_chunk = v[:, :, i]
 
             chunk_kv = torch.matmul(k_chunk.transpose(-2, -1), v_chunk)
             out_chunk = torch.matmul(q_chunk, kv_state + chunk_kv)
