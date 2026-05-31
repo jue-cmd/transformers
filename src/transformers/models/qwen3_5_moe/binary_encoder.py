@@ -10,7 +10,7 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1):
+    def __init__(self, dim, heads=8, chunk_size=1024*512):
         super().__init__()
         self.heads = heads
         self.dim = dim
