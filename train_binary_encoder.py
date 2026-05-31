@@ -98,6 +98,8 @@ config.encoder_dim = 1024
 encoder = BinaryByteModalEncoder(config)
 model = BinaryMLMPretrainWrapper(encoder, config)
 
+model.gradient_checkpointing_enable()
+
 data_collator = BinaryMLMDataCollator(mask_prob=0.15, mask_token_id=256)
 
 dataset = load_binary_files("/home/jue/文档/dataset/temp-dataset/")

@@ -176,6 +176,8 @@ class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
     num_heads: int = 8
     llm_hidden_dim: int = 2048
     attn_nums: int = 4
+    attn_chunk_size: int = 1024 * 512
+    #pos_emb_chunk_size: int = 1024 * 1024
 
 
 @auto_docstring(checkpoint="Qwen/Qwen3.5-35B-A3B")

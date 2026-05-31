@@ -1,16 +1,11 @@
-import math
-
 from transformers import Qwen3_5MoeBinaryConfig
-
-import torch
-from torch import nn
-import torch.nn.functional as F
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1024*512):
+    def __init__(self, dim, heads=8, chunk_size=1024 * 512):
         super().__init__()
         self.heads = heads
         self.dim = dim
@@ -64,10 +59,10 @@ class LinearAttention(nn.Module):
 
 
 class LinearAttentionBlock(nn.Module):
-    def __init__(self, dim, heads=8):
+    def __init__(self, dim, heads=8, chunk_size=1024 * 512):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
-        self.attn = LinearAttention(dim, heads=heads)
+        self.attn = LinearAttention(dim, heads=heads, chunk_size=chunk_size)
         self.ln2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -105,11 +100,6 @@ class PerceiverResampler(nn.Module):
         return x
 
 
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-
 class BytePositionalConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
@@ -117,7 +107,7 @@ class BytePositionalConv(nn.Module):
         self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
         self.padding_size = kernel_size // 2
 
-    def forward(self, x, eval_chunk_size=None):
+    def forward(self, x):
         B, L, E = x.shape
         if self.conv.weight.dtype != x.dtype or self.conv.weight.device != x.device:
             self.conv.to(device=x.device, dtype=x.dtype)
@@ -125,6 +115,7 @@ class BytePositionalConv(nn.Module):
         x_padded = F.pad(x_t, (self.padding_size, self.padding_size), mode='constant', value=0)
         out_t = self.conv(x_padded)
         return out_t.transpose(1, 2)
+
 
 class BinaryByteModalEncoder(nn.Module):
     def __init__(self, config):
@@ -136,11 +127,12 @@ class BinaryByteModalEncoder(nn.Module):
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
         self.encoder_layers = nn.ModuleList([
-            LinearAttentionBlock(dim=config.encoder_dim, heads=8) for _ in range(config.attn_nums)
+            LinearAttentionBlock(dim=config.encoder_dim, heads=8, chunk_size=config.attn_chunk_size) for _ in
+            range(config.attn_nums)
         ])
 
         self.pos_conv = BytePositionalConv(config.encoder_dim, config.encoder_dim, kernel_size=5, padding=2,
-                                                       groups=config.encoder_dim)
+                                           groups=config.encoder_dim)
 
     def forward(self, byte_ids):
         B, L = byte_ids.shape
@@ -150,7 +142,7 @@ class BinaryByteModalEncoder(nn.Module):
             L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
-        x += self.pos_conv(x)
+        x = self.pos_conv(x) + x
 
         E = x.shape[-1]
         K = self.downsample_factor
@@ -191,12 +183,6 @@ class BinaryEncoderForLLm(nn.Module):
 
 
 class BinaryMLMPretrainWrapper(nn.Module):
-    """
-    掩码/全文语言模型预训练包装器
-    专门针对 PE/ELF 等具备全局关联性的二进制结构设计。
-    支持对序列中的任意部分（包含尾部特定字符）进行多标签分类预测（0-255）。
-    """
-
     def __init__(self, encoder: BinaryByteModalEncoder, config):
         super().__init__()
         self.encoder = encoder
