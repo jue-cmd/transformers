@@ -104,11 +104,19 @@ class PerceiverResampler(nn.Module):
         x = self.mlp(self.ln2(x)) + x
         return x
 
-class BytePositionalConv(nn.Module):
+
+import torch
+import torch.nn as nn
+import math
+
+
+class BytePositionalConvHFCompatible(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
         super().__init__()
         self.kernel_size = kernel_size
-        self.padding_size = kernel_size // 2  # 对于 kernel=5，这里是 2
+        self.padding_size = kernel_size // 2  # kernel=5 时为 2
+
+        # 保持全连接层权重
         self.weight = nn.Parameter(torch.Tensor(in_channels, kernel_size))
         if kwargs.get('bias', True):
             self.bias = nn.Parameter(torch.Tensor(in_channels))
@@ -122,11 +130,18 @@ class BytePositionalConv(nn.Module):
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 
-    def forward(self, x):
+    def forward(self, x, eval_chunk_size=32768):
+        B, L, E = x.shape
         x_pad = torch.nn.functional.pad(x, (0, 0, self.padding_size, self.padding_size), mode='constant', value=0)
-        x_windows = x_pad.unfold(dimension=1, size=self.kernel_size, step=1)
-        out = torch.einsum('blek,ek->ble', x_windows, self.weight)
-
+        x_windows = x_pad.unfold(dimension=1, size=self.kernel_size, step=1)  # [B, L, E, 5]
+        sub_chunks = []
+        for i in range(0, L, eval_chunk_size):
+            chunk_win = x_windows[:, i: i + eval_chunk_size, :, :]
+            chunk_out = torch.einsum('blek,ek->ble', chunk_win, self.weight)
+            sub_chunks.append(chunk_out)
+        out = torch.cat(sub_chunks, dim=1)
+        if self.bias is not None:
+            out += self.bias
         return out
 
 
