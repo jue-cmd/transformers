@@ -60,7 +60,8 @@ def load_binary_files(file_dir, chunk_size=2048):
 from transformers import TrainingArguments, Trainer, Qwen3_5MoeBinaryConfig
 
 config = Qwen3_5MoeBinaryConfig()
-
+config.attn_nums=8
+config.encoder_dim = 1024
 
 
 encoder = BinaryByteModalEncoder(config)
@@ -76,6 +77,7 @@ training_args = TrainingArguments(
     output_dir="./binary_mlm_output",
     num_train_epochs=5,
     per_device_train_batch_size=4,
+    gradient_accumulation_steps=2,
     save_strategy="epoch",
     learning_rate=3e-5,
     weight_decay=0.01,

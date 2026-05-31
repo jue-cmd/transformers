@@ -170,7 +170,7 @@ class Qwen3_5MoeBinaryConfig(PreTrainedConfig):
 
     num_queries: int = 256
     encoder_dim: int = 2048
-    downsample_factor: int = 16
+    downsample_factor: int = 2
     out_hidden_size: int = 2048
     initializer_range: float = 0.02
     num_heads: int = 8
