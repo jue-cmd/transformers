@@ -108,7 +108,6 @@ class BytePositionalConv(nn.Module):
         self.padding_size = kernel_size // 2
 
     def forward(self, x):
-        B, L, E = x.shape
         if self.conv.weight.dtype != x.dtype or self.conv.weight.device != x.device:
             self.conv.to(device=x.device, dtype=x.dtype)
         x_t = x.transpose(1, 2)
