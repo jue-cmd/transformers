@@ -9,7 +9,7 @@ import torch.nn as nn
 
 
 class LinearAttention(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=512):
+    def __init__(self, dim, heads=8, chunk_size=1024*0):
         super().__init__()
         self.heads = heads
         self.dim = dim
@@ -198,8 +198,6 @@ class BinaryMLMPretrainWrapper(nn.Module):
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
-            print(logits.shape)
-            print(labels.shape)
             loss = loss_fct(logits.view(-1, 256), labels.view(-1))
         if loss is not None:
             return loss, logits
