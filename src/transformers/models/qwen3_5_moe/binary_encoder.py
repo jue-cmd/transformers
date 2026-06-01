@@ -85,16 +85,14 @@ class PerceiverResampler(nn.Module):
 
 
 class BytePositionalConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__()
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, **kwargs)
+        self.conv = nn.Conv1d(*args, **kwargs)
 
     def forward(self, x):
-        if self.conv.weight.dtype != x.dtype or self.conv.weight.device != x.device:
-            self.conv.to(device=x.device, dtype=x.dtype)
         x_t = x.transpose(1, 2)
         out_t = self.conv(x_t)
-        return out_t.transpose(1, 2)
+        return out_t.transpose(1, 2).contiguous()
 
 
 class BinaryByteModalEncoder(nn.Module):
