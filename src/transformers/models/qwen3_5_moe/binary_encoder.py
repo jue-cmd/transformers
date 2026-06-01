@@ -31,7 +31,7 @@ class LinearAttention(nn.Module):
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
-        g = torch.sigmoid(self.g_proj(x))
+        g = F.silu(self.g_proj(x))
 
         q = F.normalize(q, p=2, dim=-1)
         k = F.normalize(k, p=2, dim=-1)
