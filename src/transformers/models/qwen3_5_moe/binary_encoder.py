@@ -33,8 +33,8 @@ class LinearAttention(nn.Module):
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = torch.sigmoid(self.g_proj(x))
 
-        q = F.silu(q) + 1
-        k = F.silu(k) + 1
+        q = torch.softmax(q, dim=-1)
+        k = torch.softmax(k, dim=-1)
 
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
@@ -57,8 +57,8 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = self.attn(self.ln1(x)) + x
-        x = self.mlp(self.ln2(x)) + x
+        x = x + self.attn(self.ln1(x))
+        x = x + self.mlp(self.ln2(x))
         return x
 
 
@@ -80,7 +80,7 @@ class PerceiverResampler(nn.Module):
         queries = self.queries.unsqueeze(0).repeat(B, 1, 1)
         attn_out, _ = self.attn(query=queries, key=x, value=x)
         x = queries + self.ln1(attn_out)
-        x = self.mlp(self.ln2(x)) + x
+        x = x + self.mlp(self.ln2(x))
         return x
 
 
