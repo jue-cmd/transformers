@@ -137,7 +137,7 @@ class BinaryByteModalEncoder(nn.Module):
 
         E = x.shape[-1]
 
-        x = x.view(B, L // self.downsample_factor, self.downsample_factor * E)
+        x = x.reshape(B, L // self.downsample_factor, self.downsample_factor * E)
         x = self.folding_proj(x)
         for layer in self.encoder_layers:
             x = layer(x)
