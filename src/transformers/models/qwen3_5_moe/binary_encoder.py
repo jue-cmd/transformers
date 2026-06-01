@@ -24,34 +24,24 @@ class LinearAttention(nn.Module):
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.g_proj, self.out_proj]:
             nn.init.normal_(proj.weight, mean=0.0, std=0.02)
 
-    def forward(self, x, chunk_size=1024 * 512):
+    def forward(self, x):
         B, N, D = x.shape
         H, HD = self.heads, self.head_dim
+
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = torch.sigmoid(self.g_proj(x))
 
-        q = torch.sigmoid(q)
-        k = torch.sigmoid(k)
+        q = F.silu(q) + 1
+        k = F.silu(k) + 1
 
-        kv_state = torch.zeros(B, H, HD, HD, dtype=x.dtype, device=x.device)
-        output_chunks = []
-        chunk_size = 1 if not self.training else chunk_size
-        for i in range(0, N, chunk_size):
-            q_chunk = q[:, :, i:i + chunk_size, :]
-            k_chunk = k[:, :, i:i + chunk_size, :]
-            v_chunk = v[:, :, i:i + chunk_size, :]
-            chunk_kv = torch.matmul(k_chunk.transpose(-2, -1), v_chunk)
-            out_chunk = torch.matmul(q_chunk, kv_state + chunk_kv)
-            output_chunks.append(out_chunk)
-            kv_state = kv_state + chunk_kv
+        kv = torch.matmul(k.transpose(-2, -1), v)
+        out = torch.matmul(q, kv)
+        out = out.transpose(1, 2).contiguous().view(B * N, H, HD)
+        out = self.feature_norm(out).view(B, N, D)
 
-        out = torch.cat(output_chunks, dim=2)
-        out = self.feature_norm(out)
-        out = out.transpose(1, 2).contiguous().view(B, N, D)
-        out.mul_(g)
-        return self.out_proj(out)
+        return self.out_proj(out * g)
 
 
 class LinearAttentionBlock(nn.Module):
