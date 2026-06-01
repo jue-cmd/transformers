@@ -164,25 +164,40 @@ class BinaryMLMPretrainWrapper(nn.Module):
         super().__init__()
         self.encoder = encoder
         self.downsample_factor = config.downsample_factor
-
-        self.mlm_head = nn.Sequential(
+        self.encoder_dim = config.encoder_dim
+        self.projector = nn.Sequential(
             nn.Linear(config.encoder_dim, config.encoder_dim * 2),
             nn.GELU(),
             nn.LayerNorm(config.encoder_dim * 2),
-            nn.Linear(config.encoder_dim * 2, config.downsample_factor * 256)
+            nn.Linear(config.encoder_dim * 2, config.downsample_factor * config.encoder_dim)
         )
+        self.local_refiner = nn.Conv1d(
+            in_channels=config.encoder_dim,
+            out_channels=config.encoder_dim,
+            kernel_size=3,
+            padding=1,
+            groups=8
+        )
+
+        self.classifier = nn.Linear(config.encoder_dim, 256)
 
     def forward(self, byte_ids, labels=None):
         B, L = byte_ids.shape
         x = self.encoder(byte_ids)
-        L_compressed = x.shape[1]
-        logits = self.mlm_head(x)
-        logits = logits.view(B, L_compressed * self.downsample_factor, 256)
+        B, L_compressed, E = x.shape
+        x = self.projector(x)
+        x = x.view(B, L_compressed * self.downsample_factor, E)
+        x_t = x.transpose(1, 2)
+        x_t = self.local_refiner(x_t) + x_t
+        x = x_t.transpose(1, 2)
+        logits = self.classifier(x)
         logits = logits[:, :L, :]
+
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
             loss = loss_fct(logits.view(-1, 256), labels.view(-1))
+
         if loss is not None:
             return loss, logits
         return logits
