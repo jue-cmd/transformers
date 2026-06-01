@@ -45,11 +45,10 @@ class LinearAttention(nn.Module):
 
 
 class LinearAttentionBlock(nn.Module):
-    def __init__(self, dim, heads=8, chunk_size=1024 * 512):
+    def __init__(self, dim, heads=8):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
         self.attn = LinearAttention(dim, heads=heads)
-        self.chunk_size = chunk_size
         self.ln2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * 4),
@@ -58,7 +57,7 @@ class LinearAttentionBlock(nn.Module):
         )
 
     def forward(self, x):
-        x = self.attn(self.ln1(x), chunk_size=self.chunk_size) + x
+        x = self.attn(self.ln1(x)) + x
         x = self.mlp(self.ln2(x)) + x
         return x
 
@@ -108,7 +107,7 @@ class BinaryByteModalEncoder(nn.Module):
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
         self.encoder_layers = nn.ModuleList([
-            LinearAttentionBlock(dim=config.encoder_dim, heads=8, chunk_size=config.attn_chunk_size) for _ in
+            LinearAttentionBlock(dim=config.encoder_dim, heads=config.num_heads) for _ in
             range(config.attn_nums)
         ])
 
