@@ -33,8 +33,8 @@ class LinearAttention(nn.Module):
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = torch.sigmoid(self.g_proj(x))
 
-        q = torch.softmax(q, dim=-1)
-        k = torch.softmax(k, dim=-1)
+        q = F.normalize(q, p=2, dim=-1)
+        k = F.normalize(k, p=2, dim=-1)
 
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
@@ -91,7 +91,7 @@ class BytePositionalConv(nn.Module):
 
     def forward(self, x):
         x_t = x.transpose(1, 2)
-        out_t = self.conv(x_t) + x_t
+        out_t = self.conv(x_t)
         return out_t.transpose(1, 2).contiguous()
 
 
@@ -120,7 +120,7 @@ class BinaryByteModalEncoder(nn.Module):
             L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
-        x = self.pos_conv(x)
+        x = self.pos_conv(x) + x
 
         E = x.shape[-1]
 
