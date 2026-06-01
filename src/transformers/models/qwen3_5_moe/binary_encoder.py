@@ -91,7 +91,7 @@ class BytePositionalConv(nn.Module):
 
     def forward(self, x):
         x_t = x.transpose(1, 2)
-        out_t = self.conv(x_t)
+        out_t = self.conv(x_t) + x_t
         return out_t.transpose(1, 2).contiguous()
 
 
@@ -120,7 +120,7 @@ class BinaryByteModalEncoder(nn.Module):
             L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
-        x = self.pos_conv(x) + x
+        x = self.pos_conv(x)
 
         E = x.shape[-1]
 
