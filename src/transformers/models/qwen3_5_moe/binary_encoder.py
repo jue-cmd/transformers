@@ -33,8 +33,8 @@ class LinearAttention(nn.Module):
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = F.silu(self.g_proj(x))
 
-        q = F.normalize(q, p=2, dim=-1)
-        k = F.normalize(k, p=2, dim=-1)
+        q = F.elu(q) + 1.0
+        k = F.elu(k) + 1.0
 
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
