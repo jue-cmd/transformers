@@ -27,17 +27,17 @@ class LinearAttention(nn.Module):
     def forward(self, x):
         B, N, D = x.shape
         H, HD = self.heads, self.head_dim
-
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = F.silu(self.g_proj(x))
-
         q = F.elu(q) + 1.0
         k = F.elu(k) + 1.0
-
+        k_sum = k.sum(dim=-2, keepdim=True)
+        denom = torch.matmul(q, k_sum.transpose(-2, -1)) + 1e-6
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
+        out = out / denom
         out = out.transpose(1, 2).contiguous().view(B * N, H, HD)
         out = self.feature_norm(out).view(B, N, D)
 
