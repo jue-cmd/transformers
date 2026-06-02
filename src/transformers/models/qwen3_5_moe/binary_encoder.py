@@ -100,7 +100,7 @@ class BinaryByteModalEncoder(nn.Module):
         super().__init__()
         self.downsample_factor = config.downsample_factor
 
-        self.byte_embedding = nn.Embedding(257, config.encoder_dim)
+        self.byte_embedding = nn.Embedding(256, config.encoder_dim)
 
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 

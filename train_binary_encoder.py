@@ -112,9 +112,9 @@ class PyTorchProfilerCallback(TrainerCallback):
 
 
 class BinaryMLMDataCollator:
-    def __init__(self, mask_prob=0.15, mask_token_id=256):
+    def __init__(self, mask_prob=0.15):
         self.mask_prob = mask_prob
-        self.mask_token_id = mask_token_id
+        # 移除了 mask_token_id
 
     def __call__(self, examples):
         batch_byte_ids = [torch.tensor(e['byte_ids'], dtype=torch.long) for e in examples]
@@ -124,10 +124,10 @@ class BinaryMLMDataCollator:
         masked_indices = torch.bernoulli(probability_matrix).bool()
         labels[~masked_indices] = -100
         indices_replaced = torch.bernoulli(torch.full(byte_ids.shape, 0.8)).bool() & masked_indices
-        byte_ids[indices_replaced] = self.mask_token_id
-        indices_random = torch.bernoulli(torch.full(byte_ids.shape, 0.5)).bool() & masked_indices & ~indices_replaced
         random_words = torch.randint(0, 256, byte_ids.shape, dtype=torch.long)
-        byte_ids[indices_random] = random_words[indices_random]
+
+        byte_ids[indices_replaced] = random_words[indices_replaced]
+
         return {
             "byte_ids": byte_ids,
             "labels": labels
