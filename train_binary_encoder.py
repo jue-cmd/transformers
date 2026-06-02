@@ -29,30 +29,43 @@ class GradientMonitorCallback(TrainerCallback):
     def __init__(self, log_steps=10):
         self.log_steps = log_steps
 
-    def on_substep_end(self, args, state, control, **kwargs):
-        pass
-
     @torch.no_grad()
-    def on_step_end(self, args, state, control, model=None, **kwargs):
+    def on_substep_end(self, args, state, control, model=None, **kwargs):
+        # 1. 步数与空指针检查
         if state.global_step % self.log_steps != 0 or model is None:
             return
+
         wandb_metrics = {}
-        print(f"\n--- [Step {state.global_step}] 核心层梯度范数（Gradient Norm）全景扫描 喵～ ---")
-        if hasattr(model, "module"):
-            target_model = model
-        else:
-            target_model = model
-        if hasattr(target_model.encoder,
-                   "byte_embedding") and target_model.encoder.byte_embedding.weight.grad is not None:
-            emb_grad = target_model.encoder.byte_embedding.weight.grad.norm().item()
-            wandb_metrics['Embedding'] = emb_grad
-            print(f"[Embedding] byte_embedding: {emb_grad:.4f}")
-        if hasattr(target_model.encoder, "pos_conv") and target_model.encoder.pos_conv.conv.weight.grad is not None:
-            conv_grad = target_model.encoder.pos_conv.conv.weight.grad.norm().item()
-            wandb_metrics['PosConv'] = conv_grad
-            print(f"[PosConv] positional_conv: {conv_grad:.4f}")
-        if hasattr(target_model.encoder, "encoder_layers"):
-            for i, layer in enumerate(target_model.encoder.encoder_layers):
+        print(f"\n--- [Step {state.global_step}] Binary MLM 预训练梯度全景扫描 喵～ ---")
+
+        # 2. 剥离 DDP / FSDP 的多卡分布式外壳
+        target_model = model
+        while hasattr(target_model, "module"):
+            target_model = target_model.module
+
+        # 3. 精准定位你的 BinaryByteModalEncoder
+        # 对应：wrapper.encoder
+        encoder = getattr(target_model, "encoder", None)
+
+        # 4. 扫描 Byte Embedding 层
+        if encoder is not None and hasattr(encoder, "byte_embedding"):
+            weight = encoder.byte_embedding.weight
+            if weight.grad is not None:
+                emb_grad = weight.grad.norm().item()
+                wandb_metrics['grad_norm/Embedding'] = emb_grad
+                print(f"[Embedding] byte_embedding: {emb_grad:.4f}")
+
+        # 5. 扫描 一维位置卷积层 (BytePositionalConv)
+        if encoder is not None and hasattr(encoder, "pos_conv"):
+            if hasattr(encoder.pos_conv, "conv") and encoder.pos_conv.conv.weight.grad is not None:
+                conv_grad = encoder.pos_conv.conv.weight.grad.norm().item()
+                wandb_metrics['grad_norm/PosConv'] = conv_grad
+                print(f"[PosConv] positional_conv: {conv_grad:.4f}")
+
+        # 6. 遍历扫描所有线性注意力层 (LinearAttentionBlock)
+        if encoder is not None and hasattr(encoder, "encoder_layers"):
+            for i, layer in enumerate(encoder.encoder_layers):
+                # 检查并记录 Q, K, V, Out 投影矩阵的梯度范数
                 if layer.attn.q_proj.weight.grad is not None:
                     wandb_metrics[f"grad_norm/layer_{i}_attn_Q"] = layer.attn.q_proj.weight.grad.norm().item()
                 if layer.attn.k_proj.weight.grad is not None:
@@ -61,25 +74,34 @@ class GradientMonitorCallback(TrainerCallback):
                     wandb_metrics[f"grad_norm/layer_{i}_attn_V"] = layer.attn.v_proj.weight.grad.norm().item()
                 if layer.attn.out_proj.weight.grad is not None:
                     wandb_metrics[f"grad_norm/layer_{i}_attn_Out"] = layer.attn.out_proj.weight.grad.norm().item()
-                if layer.mlp[2].weight.grad is not None:
+
+                # 记录 MLP 的最后一层 Linear 的梯度 (Sequential 的索引 2)
+                if hasattr(layer, "mlp") and len(layer.mlp) > 2 and layer.mlp[2].weight.grad is not None:
                     wandb_metrics[f"grad_norm/layer_{i}_mlp"] = layer.mlp[2].weight.grad.norm().item()
-        if hasattr(target_model, "mlm_head"):
-            head_grads = []
-            for name, param in target_model.mlm_head.named_parameters():
-                if param.grad is not None and "weight" in name:
-                    head_grads.append(f"{name}: {param.grad.norm().item():.4f}")
-            if head_grads:
-                print(f"[MLM Head] " + " | ".join(head_grads))
-                clean_name = name.replace(".", "_").replace("_weight", "")
-                wandb_metrics[f"grad_norm/head_{clean_name}"] = param.grad.norm().item()
-        print(wandb_metrics)
-        if wandb_metrics and wandb is not None:
+
+        # 7. 精准扫描 MLM 分类输出头 (对应你 Wrapper 里的 self.classifier)
+        classifier = getattr(target_model, "classifier", None)
+        if classifier is not None and classifier.weight.grad is not None:
+            cls_grad = classifier.weight.grad.norm().item()
+            wandb_metrics['grad_norm/MLM_Classifier'] = cls_grad
+            print(f"[MLM Head] classifier: {cls_grad:.4f}")
+
+        # 同时检查 Wrapper 里的中间 projector（如果有梯度）
+        projector = getattr(target_model, "projector", None)
+        if projector is not None and len(projector) > 3 and projector[3].weight.grad is not None:
+            proj_grad = projector[3].weight.grad.norm().item()
+            wandb_metrics['grad_norm/Wrapper_Projector'] = proj_grad
+            print(f"[Wrapper] projector_last_layer: {proj_grad:.4f}")
+
+        # 8. 统一将指标推送到 WandB 并在终端打印摘要
+        num_metrics = len(wandb_metrics)
+        print(f"-> 本步成功捕获到 {num_metrics} 个核心参数的梯度指标")
+
+        if wandb_metrics and wandb is not None and wandb.run is not None:
             wandb.log(wandb_metrics, step=state.global_step)
+            print(f"[WandB Monitor] Step {state.global_step}: 梯度数据已成功同步至面板 喵～")
 
-            print(
-                f"[WandB Monitor] Step {state.global_step}: 已成功将 {len(wandb_metrics)} 个层的梯度范数推送到面板 喵～")
         print("-" * 60 + "\n")
-
 
 class PyTorchProfilerCallback(TrainerCallback):
     def __init__(self, output_dir="./log/profiler"):
@@ -112,9 +134,9 @@ class PyTorchProfilerCallback(TrainerCallback):
 
 
 class BinaryMLMDataCollator:
-    def __init__(self, mask_prob=0.15, mask_token_id=256):
+    def __init__(self, mask_prob=0.15):
         self.mask_prob = mask_prob
-        self.mask_token_id = mask_token_id
+        # 移除了 mask_token_id
 
     def __call__(self, examples):
         batch_byte_ids = [torch.tensor(e['byte_ids'], dtype=torch.long) for e in examples]
@@ -124,10 +146,10 @@ class BinaryMLMDataCollator:
         masked_indices = torch.bernoulli(probability_matrix).bool()
         labels[~masked_indices] = -100
         indices_replaced = torch.bernoulli(torch.full(byte_ids.shape, 0.8)).bool() & masked_indices
-        byte_ids[indices_replaced] = self.mask_token_id
-        indices_random = torch.bernoulli(torch.full(byte_ids.shape, 0.5)).bool() & masked_indices & ~indices_replaced
         random_words = torch.randint(0, 256, byte_ids.shape, dtype=torch.long)
-        byte_ids[indices_random] = random_words[indices_random]
+
+        byte_ids[indices_replaced] = random_words[indices_replaced]
+
         return {
             "byte_ids": byte_ids,
             "labels": labels
@@ -233,10 +255,9 @@ class DistributedBinaryDataset(Dataset):
 
 def main():
     config = Qwen3_5MoeBinaryConfig()
-    config.downsample_factor = 8
-    config.attn_nums = 6
+    config.attn_nums = 4
     config.num_heads = 8
-    config.encoder_dim = 2048
+    config.encoder_dim = 1536
 
     encoder = BinaryByteModalEncoder(config)
     model = BinaryMLMPretrainWrapper(encoder, config)
@@ -245,32 +266,32 @@ def main():
         if isinstance(module, LinearAttentionBlock):
             make_block_checkpointed(module)
 
-    data_collator = BinaryMLMDataCollator(mask_prob=0.5, mask_token_id=256)
+    data_collator = BinaryMLMDataCollator(mask_prob=0.25, mask_token_id=256)
 
     dataset = DistributedBinaryDataset(
         file_dir="/home/jue/文档/dataset/temp-dataset/",
-        chunk_size=128,
+        chunk_size=1024,
     )
 
     training_args = TrainingArguments(
         output_dir="./binary_mlm_output",
         num_train_epochs=10,
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=20,
         save_strategy="epoch",
-        learning_rate=3e-4,
+        learning_rate=1e-4,
         weight_decay=0.01,
         logging_steps=1,
 
         bf16=torch.cuda.is_bf16_supported(),
         fp16=not torch.cuda.is_bf16_supported() and torch.cuda.is_available(),
-        dataloader_num_workers=4,
+        dataloader_num_workers=1,
         dataloader_pin_memory=True,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=4,
 
         report_to="wandb",
-        warmup_ratio=0.1,
         max_grad_norm=1.0,
         ddp_find_unused_parameters=False,
+        warmup_ratio=0.1
     )
 
     trainer = Trainer(
@@ -278,7 +299,7 @@ def main():
         args=training_args,
         data_collator=data_collator,
         train_dataset=dataset,
-        callbacks=[PyTorchProfilerCallback(), GradientMonitorCallback(log_steps=5)]
+        callbacks=[PyTorchProfilerCallback()]
     )
     trainer.train()
     if trainer.is_world_process_zero():

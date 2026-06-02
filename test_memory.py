@@ -17,13 +17,13 @@ def print_mem(label=""):
 
 @torch.no_grad()
 def main():
-    print("🚀 开始显存逐行追踪分析...")
     print_mem("初始状态")
 
     # 1. 初始化配置
     config = Qwen3_5MoeBinaryConfig()
     config.downsample_factor = 8
-    config.attn_nums = 6
+    config.attn_nums = 8
+    config.num_heads = 16
     config.encoder_dim = 1024
 
     # 2. 载入模型到 GPU
@@ -33,7 +33,7 @@ def main():
     print_mem("模型载入 GPU 后")
 
     # 3. 构造一个等效的虚拟 Batch（Batch=1, Length=256K）
-    B, N = 1, 1024*8
+    B, N = 1, 1024*128
     print(f"\n📊 正在模拟构造 Batch... 形状: ({B}, {N})")
     byte_ids = torch.randint(0, 256, (B, N), dtype=torch.long).cuda()
     print_mem("输入张量装载进 GPU 后")
