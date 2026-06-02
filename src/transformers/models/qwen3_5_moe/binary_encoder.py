@@ -11,14 +11,15 @@ class LinearAttention(nn.Module):
         self.heads = heads
         self.dim = dim
         self.head_dim = dim // heads
-
         self.q_proj = nn.Linear(dim, dim, bias=False)
         self.k_proj = nn.Linear(dim, dim, bias=False)
         self.v_proj = nn.Linear(dim, dim, bias=False)
         self.g_proj = nn.Linear(dim, dim, bias=False)
-
         self.out_proj = nn.Linear(dim, dim)
         self.feature_norm = nn.RMSNorm(self.head_dim, eps=1e-5)
+        if self.g_proj.bias is not None:
+            nn.init.constant_(self.g_proj.bias)
+        nn.init.constant_(self.g_proj.weight, 0.0)
 
     def forward(self, x):
         B, N, D = x.shape
@@ -26,21 +27,14 @@ class LinearAttention(nn.Module):
         q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
-        g = F.silu(self.g_proj(x))
-        q = F.elu(q) + 1.0
-        k = F.elu(k) + 1.0
+        g = F.elu(self.g_proj(x)) + 1.0
 
-        q = F.normalize(q, dim=-1)
-        k = F.normalize(k, dim=-1)
-        scale = 1.0 / (N ** 0.5)
-        q = q * scale
-        k_sum = k.sum(dim=-2, keepdim=True)
-        #denom = torch.matmul(q, k_sum.transpose(-2, -1)) + 1e-6
+        q = (F.elu(q) + 1.0)
+        k = (F.elu(k) + 1.0)
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
-        #out = out / denom
-        out = out.transpose(1, 2).contiguous().view(B * N, H, HD)
-        out = self.feature_norm(out).view(B, N, D)
+        out = out.transpose(1, 2)  # [B, N, H, HD]
+        out = out.reshape(B, N, D)
 
         return self.out_proj(out * g)
 
@@ -99,7 +93,7 @@ class BytePositionalConv(nn.Module):
 class BinaryByteModalEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.byte_embedding = nn.Embedding(258, config.encoder_dim,padding_idx=257)
+        self.byte_embedding = nn.Embedding(258, config.encoder_dim, padding_idx=257)
         self.encoder_layers = nn.ModuleList([
             LinearAttentionBlock(dim=config.encoder_dim, heads=config.num_heads) for _ in
             range(config.attn_nums)
@@ -157,7 +151,7 @@ class BinaryMLMPretrainWrapper(nn.Module):
             nn.Linear(config.encoder_dim, config.encoder_dim * 2),
             nn.GELU(),
             nn.LayerNorm(config.encoder_dim * 2),
-            nn.Linear(config.encoder_dim * 2,config.encoder_dim)
+            nn.Linear(config.encoder_dim * 2, config.encoder_dim)
         )
 
         self.classifier = nn.Linear(config.encoder_dim, 258)
