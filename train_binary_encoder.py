@@ -233,10 +233,9 @@ class DistributedBinaryDataset(Dataset):
 
 def main():
     config = Qwen3_5MoeBinaryConfig()
-    config.downsample_factor = 8
-    config.attn_nums = 6
-    config.num_heads = 8
-    config.encoder_dim = 2048
+    config.attn_nums = 8
+    config.num_heads = 16
+    config.encoder_dim = 1536
 
     encoder = BinaryByteModalEncoder(config)
     model = BinaryMLMPretrainWrapper(encoder, config)
@@ -245,32 +244,32 @@ def main():
         if isinstance(module, LinearAttentionBlock):
             make_block_checkpointed(module)
 
-    data_collator = BinaryMLMDataCollator(mask_prob=0.5, mask_token_id=256)
+    data_collator = BinaryMLMDataCollator(mask_prob=0.25, mask_token_id=256)
 
     dataset = DistributedBinaryDataset(
         file_dir="/home/jue/文档/dataset/temp-dataset/",
-        chunk_size=128,
+        chunk_size=1024,
     )
 
     training_args = TrainingArguments(
         output_dir="./binary_mlm_output",
         num_train_epochs=10,
-        per_device_train_batch_size=1,
+        per_device_train_batch_size=20,
         save_strategy="epoch",
-        learning_rate=3e-4,
+        learning_rate=1e-4,
         weight_decay=0.01,
         logging_steps=1,
 
         bf16=torch.cuda.is_bf16_supported(),
         fp16=not torch.cuda.is_bf16_supported() and torch.cuda.is_available(),
-        dataloader_num_workers=4,
+        dataloader_num_workers=1,
         dataloader_pin_memory=True,
-        gradient_accumulation_steps=1,
+        gradient_accumulation_steps=4,
 
         report_to="wandb",
-        warmup_ratio=0.1,
         max_grad_norm=1.0,
         ddp_find_unused_parameters=False,
+        warmup_ratio=0.1
     )
 
     trainer = Trainer(
