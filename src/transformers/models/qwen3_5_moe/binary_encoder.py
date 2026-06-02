@@ -100,7 +100,7 @@ class BinaryByteModalEncoder(nn.Module):
         super().__init__()
         self.downsample_factor = config.downsample_factor
 
-        self.byte_embedding = nn.Embedding(256, config.encoder_dim)
+        self.byte_embedding = nn.Embedding(258, config.encoder_dim,padding_idx=257)
 
         self.folding_proj = nn.Linear(config.encoder_dim * config.downsample_factor, config.encoder_dim)
 
@@ -114,18 +114,11 @@ class BinaryByteModalEncoder(nn.Module):
 
     def forward(self, byte_ids):
         B, L = byte_ids.shape
-        pad_len = (self.downsample_factor - (L % self.downsample_factor)) % self.downsample_factor
-        if pad_len > 0:
-            byte_ids = F.pad(byte_ids, (0, pad_len), value=0)
-            L = byte_ids.shape[1]
         x = self.byte_embedding(byte_ids)
 
         x = self.pos_conv(x) + x
 
         E = x.shape[-1]
-
-        x = x.reshape(B, L // self.downsample_factor, self.downsample_factor * E)
-        x = self.folding_proj(x)
         for layer in self.encoder_layers:
             x = layer(x)
         return x
