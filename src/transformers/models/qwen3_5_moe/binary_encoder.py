@@ -31,10 +31,8 @@ class LinearAttention(nn.Module):
         k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
         g = F.silu(self.g_proj(x))
-
-        q = F.elu(q) + 1.0
-        k = F.elu(k) + 1.0
-
+        q = F.normalize(q, p=2, dim=-1)
+        k = F.normalize(k, p=2, dim=-1)
         k_sum = k.sum(dim=-2, keepdim=True)
         denom = torch.matmul(q, k_sum.transpose(-2, -1)) + 1e-6
         kv = torch.matmul(k.transpose(-2, -1), v)
@@ -153,19 +151,14 @@ class BinaryMLMPretrainWrapper(nn.Module):
     def __init__(self, encoder: BinaryByteModalEncoder, config):
         super().__init__()
         self.encoder = encoder
-        self.downsample_factor = config.downsample_factor
         self.encoder_dim = config.encoder_dim
         self.projector = nn.Sequential(
-            nn.Linear(config.encoder_dim, config.encoder_dim * 2),
-            nn.GELU(),
-            nn.Linear(config.encoder_dim * 2, 256)
+            nn.Linear(config.encoder_dim , 256)
         )
 
     def forward(self, byte_ids, labels=None):
         B, L = byte_ids.shape
         x = self.encoder(byte_ids)
-        B, L_compressed, E = x.shape
-
         logits = self.projector(x)
         logits = logits[:, :L, :]
 

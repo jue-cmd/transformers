@@ -25,84 +25,6 @@ def make_block_checkpointed(block_module):
     return block_module
 
 
-class GradientMonitorCallback(TrainerCallback):
-    def __init__(self, log_steps=10):
-        self.log_steps = log_steps
-
-    @torch.no_grad()
-    def on_substep_end(self, args, state, control, model=None, **kwargs):
-        # 1. 步数与空指针检查
-        if state.global_step % self.log_steps != 0 or model is None:
-            return
-
-        wandb_metrics = {}
-        print(f"\n--- [Step {state.global_step}] Binary MLM 预训练梯度全景扫描 喵～ ---")
-
-        # 2. 剥离 DDP / FSDP 的多卡分布式外壳
-        target_model = model
-        while hasattr(target_model, "module"):
-            target_model = target_model.module
-
-        # 3. 精准定位你的 BinaryByteModalEncoder
-        # 对应：wrapper.encoder
-        encoder = getattr(target_model, "encoder", None)
-
-        # 4. 扫描 Byte Embedding 层
-        if encoder is not None and hasattr(encoder, "byte_embedding"):
-            weight = encoder.byte_embedding.weight
-            if weight.grad is not None:
-                emb_grad = weight.grad.norm().item()
-                wandb_metrics['grad_norm/Embedding'] = emb_grad
-                print(f"[Embedding] byte_embedding: {emb_grad:.4f}")
-
-        # 5. 扫描 一维位置卷积层 (BytePositionalConv)
-        if encoder is not None and hasattr(encoder, "pos_conv"):
-            if hasattr(encoder.pos_conv, "conv") and encoder.pos_conv.conv.weight.grad is not None:
-                conv_grad = encoder.pos_conv.conv.weight.grad.norm().item()
-                wandb_metrics['grad_norm/PosConv'] = conv_grad
-                print(f"[PosConv] positional_conv: {conv_grad:.4f}")
-
-        # 6. 遍历扫描所有线性注意力层 (LinearAttentionBlock)
-        if encoder is not None and hasattr(encoder, "encoder_layers"):
-            for i, layer in enumerate(encoder.encoder_layers):
-                # 检查并记录 Q, K, V, Out 投影矩阵的梯度范数
-                if layer.attn.q_proj.weight.grad is not None:
-                    wandb_metrics[f"grad_norm/layer_{i}_attn_Q"] = layer.attn.q_proj.weight.grad.norm().item()
-                if layer.attn.k_proj.weight.grad is not None:
-                    wandb_metrics[f"grad_norm/layer_{i}_attn_K"] = layer.attn.k_proj.weight.grad.norm().item()
-                if layer.attn.v_proj.weight.grad is not None:
-                    wandb_metrics[f"grad_norm/layer_{i}_attn_V"] = layer.attn.v_proj.weight.grad.norm().item()
-                if layer.attn.out_proj.weight.grad is not None:
-                    wandb_metrics[f"grad_norm/layer_{i}_attn_Out"] = layer.attn.out_proj.weight.grad.norm().item()
-
-                # 记录 MLP 的最后一层 Linear 的梯度 (Sequential 的索引 2)
-                if hasattr(layer, "mlp") and len(layer.mlp) > 2 and layer.mlp[2].weight.grad is not None:
-                    wandb_metrics[f"grad_norm/layer_{i}_mlp"] = layer.mlp[2].weight.grad.norm().item()
-
-        # 7. 精准扫描 MLM 分类输出头 (对应你 Wrapper 里的 self.classifier)
-        classifier = getattr(target_model, "classifier", None)
-        if classifier is not None and classifier.weight.grad is not None:
-            cls_grad = classifier.weight.grad.norm().item()
-            wandb_metrics['grad_norm/MLM_Classifier'] = cls_grad
-            print(f"[MLM Head] classifier: {cls_grad:.4f}")
-
-        # 同时检查 Wrapper 里的中间 projector（如果有梯度）
-        projector = getattr(target_model, "projector", None)
-        if projector is not None and len(projector) > 3 and projector[3].weight.grad is not None:
-            proj_grad = projector[3].weight.grad.norm().item()
-            wandb_metrics['grad_norm/Wrapper_Projector'] = proj_grad
-            print(f"[Wrapper] projector_last_layer: {proj_grad:.4f}")
-
-        # 8. 统一将指标推送到 WandB 并在终端打印摘要
-        num_metrics = len(wandb_metrics)
-        print(f"-> 本步成功捕获到 {num_metrics} 个核心参数的梯度指标")
-
-        if wandb_metrics and wandb is not None and wandb.run is not None:
-            wandb.log(wandb_metrics, step=state.global_step)
-            print(f"[WandB Monitor] Step {state.global_step}: 梯度数据已成功同步至面板 喵～")
-
-        print("-" * 60 + "\n")
-
 class PyTorchProfilerCallback(TrainerCallback):
     def __init__(self, output_dir="./log/profiler"):
         self.output_dir = output_dir
@@ -134,22 +56,23 @@ class PyTorchProfilerCallback(TrainerCallback):
 
 
 class BinaryMLMDataCollator:
-    def __init__(self, mask_prob=0.15):
+    def __init__(self, mask_prob=0.15, mask_token_id=256):
         self.mask_prob = mask_prob
-        # 移除了 mask_token_id
+        self.mask_token_id = mask_token_id  # 占用 256 作为 MASK
 
     def __call__(self, examples):
         batch_byte_ids = [torch.tensor(e['byte_ids'], dtype=torch.long) for e in examples]
         byte_ids = torch.stack(batch_byte_ids, dim=0)
         labels = byte_ids.clone()
-        probability_matrix = torch.full(byte_ids.shape, self.mask_prob)
-        masked_indices = torch.bernoulli(probability_matrix).bool()
-        labels[~masked_indices] = -100
-        indices_replaced = torch.bernoulli(torch.full(byte_ids.shape, 0.8)).bool() & masked_indices
+        masked_indices = torch.bernoulli(torch.full(byte_ids.shape, self.mask_prob)).bool()
+        labels[~masked_indices] = -100  # 没被选中的不计算 loss
+        indices_to_mask = torch.bernoulli(torch.full(byte_ids.shape, 0.8)).bool() & masked_indices
+        byte_ids[indices_to_mask] = self.mask_token_id
+        remaining_indices = masked_indices & ~indices_to_mask
+        indices_random = torch.bernoulli(torch.full(byte_ids.shape, 0.5)).bool() & remaining_indices
+
         random_words = torch.randint(0, 256, byte_ids.shape, dtype=torch.long)
-
-        byte_ids[indices_replaced] = random_words[indices_replaced]
-
+        byte_ids[indices_random] = random_words[indices_random]
         return {
             "byte_ids": byte_ids,
             "labels": labels
@@ -199,6 +122,76 @@ class BinaryMLMDataCollator:
             "labels": labels
         }
 
+
+class LabelDistributionCallback(TrainerCallback):
+    def __init__(self, log_steps=1):
+        self.log_steps = log_steps
+
+    @torch.no_grad()
+    def on_substep_end(self, args, state, control, model=None, **kwargs):
+        # 仅在指定的步数进行打印，防止刷屏
+        if state.global_step % self.log_steps != 0:
+            return
+        inputs_dict = kwargs.get("inputs", None)
+        print(inputs_dict)
+        if inputs_dict is None or "labels" not in inputs_dict:
+            # 如果真的没拿到，不做静默退出，打印一行提示方便定位
+            # print(" [Debug] 当前 Step 仍未捕获到 inputs 数据...")
+            return
+        labels = inputs_dict["labels"]
+        # 2. 过滤掉不需要计算 loss 的 -100 填充符号
+        active_labels = labels.view(-1)
+        active_labels = active_labels[active_labels != -100]
+        total_masked_count = active_labels.numel()
+
+        print(f"\n📊 ====== [Step {state.global_step}] 被 MASK 的 Labels 真实分布统计 ======")
+        print(f"当前 Batch 参与 Loss 计算的总有效字节数: {total_masked_count}")
+
+        if total_masked_count == 0:
+            print("⚠️ 警告: 当前 Batch 没有检测到任何有效被掩码的 Label！")
+            print("=" * 60 + "\n")
+            return
+
+        # 3. 统计 0-255 范围内所有 Byte 的出现次数
+        # 使用 long 类型的 active_labels 进行高效的 bincount 计数
+        byte_counts = torch.bincount(active_labels.to(torch.long), minlength=256)
+
+        # 4. 提取出现频率最高的前 5 个字节 (Top-5)
+        topk_values, topk_indices = torch.topk(byte_counts, k=5)
+
+        print("\n🔥 出现频率最高的前 5 个被掩码字节 (Top-5 High Freq):")
+        for i in range(5):
+            count = topk_values[i].item()
+            byte_id = topk_indices[i].item()
+            percentage = (count / total_masked_count) * 100
+            print(f"   Byte ID: {byte_id:<3} (0x{byte_id:02X}) | 出现次数: {count:<6} | 占比: {percentage:.2f}%")
+
+        # 5. 统计多样性：这个 Batch 一共抽到了多少种不同的 Byte
+        unique_bytes = (byte_counts > 0).sum().item()
+        print(f"\n🎲 标签多样性: 当前 Batch 共包含 {unique_bytes}/256 种不同的独立字节")
+
+        # 6. 【极客功能】画一个简单的 ASCII 水平直方图，直观展现分布趋势
+        print("\n📈 字节区间粗略分布直方图 (每 32 个字节一组):")
+        chunk_size = 32
+        for block in range(8):
+            start = block * chunk_size
+            end = start + chunk_size
+            block_sum = byte_counts[start:end].sum().item()
+            block_ratio = block_sum / total_masked_count
+
+            # 用“#”号代表条形图，最大长度 30 个字符
+            bar_length = int(block_ratio * 40)
+            bar = "#" * bar_length
+
+            print(f"   [{start:03d}-{end - 1:03d}]: {bar:<40} ({block_sum:<5}个, 占比 {block_ratio * 100:.1f}%)")
+
+        # 7. 极端分布预警
+        max_ratio = topk_values[0].item() / total_masked_count
+        if max_ratio > 0.40:
+            print(f"\n🚨 【重大警告】单一字节 0x{topk_indices[0].item():02X} 的占比高达 {max_ratio * 100:.1f}%！")
+            print("   说明你的 EXE 数据集里依然残留大面积的单调字节（如全零），这会诱发线性注意力发生特征塌陷！")
+
+        print("=" * 66 + "\n")
 
 class DistributedBinaryDataset(Dataset):
     def __init__(self, file_dir, chunk_size=4096):
@@ -291,7 +284,7 @@ def main():
         report_to="wandb",
         max_grad_norm=1.0,
         ddp_find_unused_parameters=False,
-        warmup_ratio=0.1
+        warmup_ratio=0.05
     )
 
     trainer = Trainer(
