@@ -25,22 +25,22 @@ class LinearAttention(nn.Module):
             nn.init.normal_(proj.weight, mean=0.0, std=0.02)
 
     def forward(self, x):
-        B, N, D = x.shape
+        B, L, D = x.shape
         H, HD = self.heads, self.head_dim
-        q = self.q_proj(x).view(B, N, H, HD).transpose(1, 2)
-        k = self.k_proj(x).view(B, N, H, HD).transpose(1, 2)
-        v = self.v_proj(x).view(B, N, H, HD).transpose(1, 2)
+        q = self.q_proj(x).view(B, L, H, HD).transpose(1, 2)
+        k = self.k_proj(x).view(B, L, H, HD).transpose(1, 2)
+        v = self.v_proj(x).view(B, L, H, HD).transpose(1, 2)
         g = F.silu(self.g_proj(x))
-        q = F.normalize(q, p=2, dim=-1)
-        k = F.normalize(k, p=2, dim=-1)
+        q = F.elu(q) + 1
+        k = F.elu(k) + 1
         k_sum = k.sum(dim=-2, keepdim=True)
         denom = torch.matmul(q, k_sum.transpose(-2, -1)) + 1e-6
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
         out = out / denom
-        out = out.transpose(1, 2).contiguous().view(B * N, H, HD)
+        out = out.transpose(1, 2).contiguous()
 
-        out = self.feature_norm(out).view(B, N, D)
+        out = self.feature_norm(out).view(B, L, D)
 
         return self.out_proj(out * g)
 
@@ -153,19 +153,18 @@ class BinaryMLMPretrainWrapper(nn.Module):
         self.encoder = encoder
         self.encoder_dim = config.encoder_dim
         self.projector = nn.Sequential(
-            nn.Linear(config.encoder_dim , 256)
+            nn.Linear(config.encoder_dim, 257)
         )
 
     def forward(self, byte_ids, labels=None):
         B, L = byte_ids.shape
         x = self.encoder(byte_ids)
         logits = self.projector(x)
-        logits = logits[:, :L, :]
 
         loss = None
         if labels is not None:
             loss_fct = nn.CrossEntropyLoss()
-            loss = loss_fct(logits.view(-1, 256), labels.view(-1))
+            loss = loss_fct(logits.view(-1, 257), labels.view(-1))
 
         if loss is not None:
             return loss, logits
