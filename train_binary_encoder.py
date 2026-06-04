@@ -262,14 +262,14 @@ def main():
     data_collator = BinaryMLMDataCollator(mask_prob=0.25, mask_token_id=256)
 
     dataset = DistributedBinaryDataset(
-        file_dir="/home/jue/文档/dataset/temp-dataset/",
-        chunk_size=1024,
+        file_dir="/home/jue/文档/dataset/temp-dataset/test-train/",
+        chunk_size=1024*2,
     )
 
     training_args = TrainingArguments(
         output_dir="./binary_mlm_output",
-        num_train_epochs=10,
-        per_device_train_batch_size=20,
+        num_train_epochs=20,
+        per_device_train_batch_size=16,
         save_strategy="epoch",
         learning_rate=1e-4,
         weight_decay=0.01,

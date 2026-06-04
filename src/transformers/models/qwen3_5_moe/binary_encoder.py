@@ -17,12 +17,12 @@ class LinearAttention(nn.Module):
         self.g_proj = nn.Linear(dim, dim, bias=False)
 
         self.out_proj = nn.Linear(dim, dim)
-        self.feature_norm = nn.RMSNorm(self.head_dim, eps=1e-5)
+        self.feature_norm = nn.RMSNorm(self.dim, eps=1e-5)
         self._init_weights()
 
     def _init_weights(self):
         for proj in [self.q_proj, self.k_proj, self.v_proj, self.g_proj, self.out_proj]:
-            nn.init.normal_(proj.weight, mean=0.0, std=0.02)
+            nn.init.normal_(proj.weight, mean=0.00, std=0.1)
 
     def forward(self, x):
         B, L, D = x.shape
@@ -30,17 +30,17 @@ class LinearAttention(nn.Module):
         q = self.q_proj(x).view(B, L, H, HD).transpose(1, 2)
         k = self.k_proj(x).view(B, L, H, HD).transpose(1, 2)
         v = self.v_proj(x).view(B, L, H, HD).transpose(1, 2)
-        g = F.silu(self.g_proj(x))
-        q = F.elu(q) + 1
-        k = F.elu(k) + 1
+        g = F.relu(self.g_proj(x))
+        q = F.elu(q) + 1.0
+        k = F.elu(k) + 1.0
         k_sum = k.sum(dim=-2, keepdim=True)
         denom = torch.matmul(q, k_sum.transpose(-2, -1)) + 1e-6
         kv = torch.matmul(k.transpose(-2, -1), v)
         out = torch.matmul(q, kv)
         out = out / denom
-        out = out.transpose(1, 2).contiguous()
+        out = out.transpose(1, 2).contiguous().view(B, L, D)
 
-        out = self.feature_norm(out).view(B, L, D)
+        out = self.feature_norm(out)
 
         return self.out_proj(out * g)
 
@@ -109,7 +109,6 @@ class BinaryByteModalEncoder(nn.Module):
                                            groups=config.encoder_dim)
 
     def forward(self, byte_ids):
-        B, L = byte_ids.shape
         x = self.byte_embedding(byte_ids)
 
         x = self.pos_conv(x) + x
@@ -157,7 +156,6 @@ class BinaryMLMPretrainWrapper(nn.Module):
         )
 
     def forward(self, byte_ids, labels=None):
-        B, L = byte_ids.shape
         x = self.encoder(byte_ids)
         logits = self.projector(x)
 
